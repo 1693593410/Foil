@@ -1,0 +1,15 @@
+[package]
+name = "foil-python"
+version = "0.1.3"
+edition = "2021"
+description = "Python bindings for the foil collision library."
+license = "MIT"
+publish = false
+
+[lib]
+name = "foil_py"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+foil = { path = "..", features = ["gpu"] }
+pyo3 = { version = "0.22", features = ["extension-module"] }

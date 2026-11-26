@@ -1,0 +1,16 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "pyfoil2d"
+version = "0.1.3"
+description = "Lightweight 2D game physics engine focused on speed and simple overlap checks."
+readme = "README-pypi.md"
+requires-python = ">=3.13"
+license = { file = "LICENSE" }
+
+[tool.maturin]
+manifest-path = "python/Cargo.toml"
+bindings = "pyo3"
+module-name = "Foil"

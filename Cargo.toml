@@ -1,0 +1,29 @@
+[package]
+name = "foil"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+readme = "README.md"
+repository = "https://gitee.com/longyateng/dargon"
+description = "2D grid collision: 32px cells, two chains, box and circle."
+exclude = ["python/", "examples/", "pyproject.toml", "README-pypi.md"]
+
+[lib]
+name = "Foil"
+
+[features]
+default = ["gpu"]
+gpu = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]
+
+[package.metadata.docs.rs]
+features = ["gpu"]
+
+[dependencies]
+rayon = "1.10"
+bytemuck = { version = "1", features = ["derive"], optional = true }
+wgpu = { version = "22", optional = true }
+pollster = { version = "0.3", optional = true }
+
+[dev-dependencies]
+pollster = "0.3"
+minifb = "0.27"

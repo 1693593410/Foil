@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh" data-api="rs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Foil — 接口</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600&family=Petrona:ital,wght@0,400;0,560;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #e6eee9;
+    --ink: #17211e;
+    --muted: #4d5e57;
+    --line: #c3d2cb;
+    --solid: #1d4a42;
+    --sensor: #b85c38;
+    --chip: #f7faf8;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--paper); color: var(--ink); }
+  body {
+    margin: 0;
+    font-family: Petrona, "Songti SC", "Noto Serif SC", serif;
+    font-size: 1.125rem;
+    line-height: 1.6;
+    background-image:
+      linear-gradient(to right, rgba(29, 74, 66, 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(29, 74, 66, 0.05) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .wrap { width: min(920px, calc(100% - 2rem)); margin: 0 auto; padding: 1.5rem 0 4.5rem; }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: 1.5rem; }
+  .mark { font-family: "Familjen Grotesk", "Microsoft YaHei", sans-serif; font-weight: 600; letter-spacing: -0.03em; }
+  .switches { display: flex; gap: 0.45rem; }
+  .pill {
+    font-family: "Familjen Grotesk", "Microsoft YaHei", sans-serif;
+    background: transparent; color: var(--ink); border: 1px solid var(--ink);
+    border-radius: 999px; padding: 0.28rem 0.8rem; cursor: pointer;
+  }
+  .pill:focus-visible, a:focus-visible { outline: 2px solid var(--sensor); outline-offset: 3px; }
+  h1 {
+    font-family: "Familjen Grotesk", "Microsoft YaHei", sans-serif;
+    font-weight: 600; letter-spacing: -0.04em; line-height: 1.08;
+    font-size: clamp(2rem, 4vw, 2.8rem); margin: 0 0 0.6rem; max-width: 16ch;
+  }
+  h2 {
+    font-family: "Familjen Grotesk", "Microsoft YaHei", sans-serif;
+    font-weight: 600; font-size: 1.45rem; letter-spacing: -0.03em;
+    margin: 2.4rem 0 0.7rem; padding-top: 0.2rem;
+  }
+  h3 {
+    font-family: "Familjen Grotesk", "Microsoft YaHei", sans-serif;
+    font-weight: 600; font-size: 1.15rem; margin: 1.5rem 0 0.25rem;
+  }
+  p, li { max-width: 42rem; }
+  ul { padding-left: 1.2rem; margin: 0.3rem 0 0.8rem; }
+  li { margin: 0.2rem 0; }
+  a { color: var(--solid); }
+  code, pre { font-family: "Familjen Grotesk", ui-monospace, monospace; }
+  code { font-size: 0.92em; }
+  pre {
+    max-width: 100%; background: var(--chip); border-left: 3px solid var(--solid);
+    padding: 0.75rem 1rem; overflow-x: auto; font-size: 0.88rem; line-height: 1.45;
+    margin: 0.35rem 0 0.2rem;
+  }
+  nav.toc { margin: 1rem 0 0.4rem; }
+  nav.toc ul { columns: 2; padding-left: 1.15rem; margin: 0.35rem 0 0; }
+  html[lang="zh"] .en { display: none; }
+  html[lang="en"] .zh { display: none; }
+  html[data-api="rs"] .py { display: none; }
+  html[data-api="py"] .rs { display: none; }
+  @media (max-width: 640px) { nav.toc ul { columns: 1; } }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="mark">foil</div>
+    <div class="switches">
+      <button class="pill" id="lang" type="button">English</button>
+      <button class="pill" id="api" type="button">Python</button>
+    </div>
+  </header>
+
+  <h1 class="zh">接口</h1>
+  <h1 class="en">API</h1>
+  <p class="zh">坐标是像素，Y 向下。库不推动物体。边贴着不算重叠。矩形不旋转。编号要能放进 32 位，<code>4294967295</code> 可以用。</p>
+  <p class="en">Coordinates are pixels, Y down. The library does not move bodies. Touching edges is not an overlap. Rectangles do not rotate. An id has to fit in 32 bits; <code>4294967295</code> is allowed.</p>
+
+  <nav class="toc" aria-label="contents">
+    <ul>
+      <li><a href="#new">new</a></li>
+      <li><a href="#open">open</a></li>
+      <li><a href="#open_with">open_with</a></li>
+      <li><a href="#backend">backend</a></li>
+      <li><a href="#real">real</a></li>
+      <li><a href="#threads">threads</a></li>
+      <li><a href="#set_threads">set_threads</a></li>
+      <li><a href="#add">add</a></li>
+      <li><a href="#remove">remove</a></li>
+      <li><a href="#clear">clear</a></li>
+      <li><a href="#set_pose">set_pose</a></li>
+      <li><a href="#pose">pose</a></li>
+      <li><a href="#set_size">set_size</a></li>
+      <li><a href="#size">size</a></li>
+      <li><a href="#shape">shape</a></li>
+      <li><a href="#set_offset">set_offset</a></li>
+      <li><a href="#set_group">set_group</a></li>
+      <li><a href="#group">group</a></li>
+      <li><a href="#set_mask">set_mask</a></li>
+      <li><a href="#mask">mask</a></li>
+      <li><a href="#set_sensor">set_sensor</a></li>
+      <li><a href="#is_sensor">is_sensor</a></li>
+      <li><a href="#overlaps">overlaps</a></li>
+      <li><a href="#overlaps_at">overlaps_at</a></li>
+      <li><a href="#query">query</a></li>
+      <li><a href="#query_many">query_many</a></li>
+      <li><a href="#hit">hit</a></li>
+      <li><a href="#len">len</a></li>
+      <li><a href="#count">count</a></li>
+      <li><a href="#contains">contains</a></li>
+      <li><a href="#each">each</a></li>
+      <li><a href="#set_timing">set_timing</a></li>
+      <li><a href="#detect_ns">detect_ns</a></li>
+      <li><a href="#has_device">has_device</a></li>
+      <li><a href="#bind_device">bind_device</a></li>
+    </ul>
+  </nav>
+
+  <h2><span class="zh">创建</span><span class="en">Create</span></h2>
+
+  <h3 id="new"><code>new</code></h3>
+  <p class="zh">CPU，精度 <code>f32</code>，查询线程上限 16。</p>
+  <p class="en">CPU, <code>f32</code>, query thread cap 16.</p>
+  <pre class="rs">let world = Foil::new();</pre>
+  <pre class="py">world = Foil.Foil()
+world = Foil.Foil(backend="cpu", real="f32", threads=16)</pre>
+
+  <h3 id="open"><code>open</code></h3>
+  <p class="zh">按后端创建，精度是 <code>f32</code>。名字可以是 <code>cpu</code>、<code>dx12</code>（也认 <code>d3d12</code>、<code>directx12</code>）、<code>vulkan</code>、<code>metal</code>、<code>gl</code>（也认 <code>opengl</code>、<code>gles</code>、<code>angle</code>），以及 <code>wgpu</code>、<code>webgpu</code>、<code>gpu</code>。显卡查询是实验功能，传输开销目前大于收益。</p>
+  <p class="en">Create with a backend, in <code>f32</code>. Names: <code>cpu</code>, <code>dx12</code> (also <code>d3d12</code>, <code>directx12</code>), <code>vulkan</code>, <code>metal</code>, <code>gl</code> (also <code>opengl</code>, <code>gles</code>, <code>angle</code>), and <code>wgpu</code>, <code>webgpu</code>, <code>gpu</code>. GPU query is experimental; transfer cost currently outweighs the gain.</p>
+  <pre class="rs">let world = Foil::open("dx12")?;</pre>
+  <pre class="py">world = Foil.Foil("dx12")</pre>
+
+  <h3 id="open_with"><code>open_with</code></h3>
+  <p class="zh"><code>real</code> 写 <code>f32</code> 或 <code>f64</code>。<code>f64</code> 只能配 <code>cpu</code>，否则返回错误。Python 用构造参数，没有单独的这个函数。</p>
+  <p class="en"><code>real</code> is <code>f32</code> or <code>f64</code>. <code>f64</code> only pairs with <code>cpu</code>; anything else returns an error. Python passes this to the constructor and has no separate function.</p>
+  <pre class="rs">let world = Foil::open_with("cpu", "f64")?;</pre>
+  <pre class="py">world = Foil.Foil(backend="cpu", real="f64")</pre>
+
+  <h3 id="backend"><code>backend</code></h3>
+  <p class="zh">创建时选定的后端名字。一次查询改走 CPU 时，这个字符串不变。</p>
+  <p class="en">The backend name chosen at creation. It stays put when one query falls back to the CPU.</p>
+  <pre class="rs">world.backend()</pre>
+  <pre class="py">world.backend()</pre>
+
+  <h3 id="real"><code>real</code></h3>
+  <p class="zh">返回 <code>"f32"</code> 或 <code>"f64"</code>。</p>
+  <p class="en">Returns <code>"f32"</code> or <code>"f64"</code>.</p>
+  <pre class="rs">world.real()</pre>
+  <pre class="py">world.real()</pre>
+
+  <h3 id="threads"><code>threads</code></h3>
+  <p class="zh">当前上限。写多少就用多少。<code>0</code> 表示用进程里现成的线程池，按那台机器的逻辑处理器数拆开。被查物体少于 192 个时始终单线程。</p>
+  <p class="en">The current cap. The number you set is the number used. <code>0</code> uses the process thread pool and splits by the machine’s logical processors. Fewer than 192 queried bodies always run on one thread.</p>
+  <pre class="rs">world.threads()</pre>
+  <pre class="py">world.threads()</pre>
+
+  <h3 id="set_threads"><code>set_threads</code></h3>
+  <p class="zh">改上限。<code>1</code> 始终单线程。下次批量查询才按新的数量建池。</p>
+  <p class="en">Change the cap. <code>1</code> stays single-threaded. The next batch query builds the pool at the new size.</p>
+  <pre class="rs">world.set_threads(0);</pre>
+  <pre class="py">world.set_threads(0)</pre>
+
+  <h2><span class="zh">物体</span><span class="en">Bodies</span></h2>
+
+  <h3 id="add"><code>add</code></h3>
+  <p class="zh">放进一个物体。<code>x</code> <code>y</code> 是中心，<code>w</code> <code>h</code> 是宽高。圆的半径是宽高里较大的一半。<code>shape</code> 只接受 <code>rect</code> 和 <code>circle</code>。形状写错，或编号放不进 32 位，返回错误，物体不会放进去。<code>sensor</code> 为真时只参与检测。<code>mask == 0</code> 碰上所有人，对方 <code>group == 0</code> 也碰上。0 不是「谁都不碰」。</p>
+  <p class="en">Insert a body. <code>x</code> <code>y</code> is the center, <code>w</code> <code>h</code> the full size. A circle’s radius is half the larger side. <code>shape</code> accepts only <code>rect</code> and <code>circle</code>. A bad shape, or an id that does not fit in 32 bits, returns an error and inserts nothing. <code>sensor</code> true means detection only. <code>mask == 0</code> meets everyone, and so does the other body’s <code>group == 0</code>. 0 does not mean “meet nobody.”</p>
+  <pre class="rs">world.add(id, x, y, w, h, "rect", false, group, mask)?;</pre>
+  <pre class="py">world.add(idx, x, y, w, h, shape="rect", sensor=False, group=0, mask=0)</pre>
+
+  <h3 id="remove"><code>remove</code></h3>
+  <p class="zh">按编号删掉。编号不在世界里时什么也不做。</p>
+  <p class="en">Remove by id. A missing id does nothing.</p>
+  <pre class="rs">world.remove(id);</pre>
+  <pre class="py">world.remove(idx)</pre>
+
+  <h3 id="clear"><code>clear</code></h3>
+  <p class="zh">清空全部物体和格子。</p>
+  <p class="en">Remove every body and the grid.</p>
+  <pre class="rs">world.clear();</pre>
+  <pre class="py">world.clear()</pre>
+
+  <h3 id="set_pose"><code>set_pose</code></h3>
+  <p class="zh">改中心。不存在的编号会被忽略。</p>
+  <p class="en">Move the center. A missing id is ignored.</p>
+  <pre class="rs">world.set_pose(id, x, y);</pre>
+  <pre class="py">world.set_pose(idx, x, y)</pre>
+
+  <h3 id="pose"><code>pose</code></h3>
+  <p class="zh">读中心。编号不存在时返回 <code>None</code>。</p>
+  <p class="en">Read the center. Returns <code>None</code> when the id is missing.</p>
+  <pre class="rs">let (x, y) = world.pose(id)?;</pre>
+  <pre class="py">xy = world.pose(idx)</pre>
+
+  <h3 id="set_size"><code>set_size</code></h3>
+  <p class="zh">改宽高。Rust 的形状参数在尺寸前面，空字符串表示沿用现在的形状。Python 的形状在最后，默认也是空字符串。形状名写错才返回错误。</p>
+  <p class="en">Change width and height. In Rust the shape argument comes before the size; an empty string keeps the current shape. In Python the shape is last and defaults to an empty string. Only an unknown shape name returns an error.</p>
+  <pre class="rs">world.set_size(id, "circle", w, h)?;</pre>
+  <pre class="py">world.set_size(idx, w, h, shape="")</pre>
+
+  <h3 id="size"><code>size</code></h3>
+  <p class="zh">读宽高。编号不存在时没有结果。</p>
+  <p class="en">Read width and height. No result when the id is missing.</p>
+  <pre class="rs">let (w, h) = world.size(id)?;</pre>
+  <pre class="py">w, h = world.size(idx)</pre>
+
+  <h3 id="shape"><code>shape</code></h3>
+  <p class="zh">返回 <code>"rect"</code> 或 <code>"circle"</code>。</p>
+  <p class="en">Returns <code>"rect"</code> or <code>"circle"</code>.</p>
+  <pre class="rs">world.shape(id)</pre>
+  <pre class="py">world.shape(idx)</pre>
+
+  <h3 id="set_offset"><code>set_offset</code></h3>
+  <p class="zh">形状中心相对 <code>set_pose</code> 的偏移。</p>
+  <p class="en">Offset of the shape center from <code>set_pose</code>.</p>
+  <pre class="rs">world.set_offset(id, ox, oy);</pre>
+  <pre class="py">world.set_offset(idx, ox, oy)</pre>
+
+  <h3 id="set_group"><code>set_group</code></h3>
+  <p class="zh">改自己的分组位。</p>
+  <p class="en">Set this body’s group bits.</p>
+  <pre class="rs">world.set_group(id, group);</pre>
+  <pre class="py">world.set_group(idx, group)</pre>
+
+  <h3 id="group"><code>group</code></h3>
+  <p class="zh">读分组位。</p>
+  <p class="en">Read the group bits.</p>
+  <pre class="rs">world.group(id)</pre>
+  <pre class="py">world.group(idx)</pre>
+
+  <h3 id="set_mask"><code>set_mask</code></h3>
+  <p class="zh">改掩码。0 表示碰上所有人。</p>
+  <p class="en">Set the mask. 0 meets everyone.</p>
+  <pre class="rs">world.set_mask(id, mask);</pre>
+  <pre class="py">world.set_mask(idx, mask)</pre>
+
+  <h3 id="mask"><code>mask</code></h3>
+  <p class="zh">读掩码。</p>
+  <p class="en">Read the mask.</p>
+  <pre class="rs">world.mask(id)</pre>
+  <pre class="py">world.mask(idx)</pre>
+
+  <h3 id="set_sensor"><code>set_sensor</code></h3>
+  <p class="zh">改成传感器或实体。传感器互相看不见，实体仍能看见传感器。</p>
+  <p class="en">Turn the body into a sensor or a solid. Sensors do not see each other. A solid still sees sensors.</p>
+  <pre class="rs">world.set_sensor(id, true);</pre>
+  <pre class="py">world.set_sensor(idx, True)</pre>
+
+  <h3 id="is_sensor"><code>is_sensor</code></h3>
+  <p class="zh">编号不存在时返回假。</p>
+  <p class="en">Returns false when the id is missing.</p>
+  <pre class="rs">world.is_sensor(id)</pre>
+  <pre class="py">world.is_sensor(idx)</pre>
+
+  <h2><span class="zh">查询</span><span class="en">Queries</span></h2>
+
+  <h3 id="overlaps"><code>overlaps</code></h3>
+  <p class="zh">用它存着的位置，返回重叠到的编号。边贴着不算。传感器不会列出别的传感器。</p>
+  <p class="en">Using its stored position, return the overlapping ids. Touching edges do not count. A sensor does not list other sensors.</p>
+  <pre class="rs">let hits = world.overlaps(id);</pre>
+  <pre class="py">hits = world.overlaps(idx)</pre>
+
+  <h3 id="overlaps_at"><code>overlaps_at</code></h3>
+  <p class="zh">临时放到 <code>(x, y)</code> 再查，不改存着的坐标。</p>
+  <p class="en">Query as if it were at <code>(x, y)</code>, without storing that position.</p>
+  <pre class="rs">let hits = world.overlaps_at(id, x, y);</pre>
+  <p class="zh py">Python 没有这个方法。</p>
+  <p class="en py">Not wrapped in Python.</p>
+
+  <h3 id="query"><code>query</code></h3>
+  <p class="zh">一次查很多个编号。结果是 <code>(被查询的编号, 对方)</code>。两边都在名单里时，两个方向都留。选了显卡且精度是 <code>f32</code> 时先走显卡，查不了再整次改走 CPU。显卡路径是实验功能。</p>
+  <p class="en">Query many ids at once. Each result is <code>(queried id, other id)</code>. When both ids are in the list, both directions are kept. With a GPU backend and <code>f32</code>, the GPU runs first; if it cannot, the whole query uses the CPU. The GPU path is experimental.</p>
+  <pre class="rs">let pairs = world.query(&amp;ids);</pre>
+  <pre class="py">pairs = world.query(ids)</pre>
+
+  <h3 id="query_many"><code>query_many</code></h3>
+  <p class="zh">和 <code>query</code> 同一套 CPU 检测，把结果追加进你给的 <code>Vec</code>。不走显卡。</p>
+  <p class="en">The same CPU detection as <code>query</code>, appending into a <code>Vec</code> you pass. It does not use the GPU.</p>
+  <pre class="rs">world.query_many(&amp;ids, &amp;mut pairs);</pre>
+  <p class="zh py">Python 没有这个方法。用 query。</p>
+  <p class="en py">Not wrapped in Python. Use query.</p>
+
+  <h3 id="hit"><code>hit</code></h3>
+  <p class="zh">问这两个编号在给定中心上是否重叠。分组和形状都算，位置由参数给出。</p>
+  <p class="en">Whether these two ids overlap at the given centers. Groups and shapes count. The positions come from the arguments.</p>
+  <pre class="rs">world.hit(a, ax, ay, b, bx, by)</pre>
+  <p class="zh py">Python 没有这个方法。</p>
+  <p class="en py">Not wrapped in Python.</p>
+
+  <h2><span class="zh">数量</span><span class="en">Counts</span></h2>
+
+  <h3 id="len"><code>len</code></h3>
+  <p class="zh">实体个数。传感器不算。</p>
+  <p class="en">Solid count. Sensors are left out.</p>
+  <pre class="rs">world.len()</pre>
+  <pre class="py">world.len()</pre>
+
+  <h3 id="count"><code>count</code></h3>
+  <p class="zh">还在世界里的物体，含传感器。</p>
+  <p class="en">Bodies still in the world, sensors included.</p>
+  <pre class="rs">world.count()</pre>
+  <pre class="py">world.count()</pre>
+
+  <h3 id="contains"><code>contains</code></h3>
+  <p class="zh">这个编号是否还在。</p>
+  <p class="en">Whether this id is still present.</p>
+  <pre class="rs">world.contains(id)</pre>
+  <p class="zh py">Python 没有这个方法。</p>
+  <p class="en py">Not wrapped in Python.</p>
+
+  <h3 id="each"><code>each</code></h3>
+  <p class="zh">逐个交给回调。<code>BodyView</code> 有 <code>id</code>、<code>x</code>、<code>y</code>、<code>is_sensor</code>。</p>
+  <p class="en">Hand each live body to a callback. <code>BodyView</code> has <code>id</code>, <code>x</code>, <code>y</code>, and <code>is_sensor</code>.</p>
+  <pre class="rs">world.each(|body| { let _ = body.id; });</pre>
+  <p class="zh py">Python 没有这个方法。</p>
+  <p class="en py">Not wrapped in Python.</p>
+
+  <h2><span class="zh">显卡</span><span class="en">GPU</span></h2>
+
+  <h3 id="set_timing"><code>set_timing</code></h3>
+  <p class="zh">打开之后，<code>query</code> 才读显卡上的检测耗时。CPU 后端没有这个数。</p>
+  <p class="en">After this is on, <code>query</code> reads GPU detection time. A CPU backend has no such number.</p>
+  <pre class="rs">world.set_timing(true);</pre>
+  <pre class="py">world.set_timing(True)</pre>
+
+  <h3 id="detect_ns"><code>detect_ns</code></h3>
+  <p class="zh">历次显卡检测耗时合计，单位纳秒。</p>
+  <p class="en">Total GPU detection time across queries, in nanoseconds.</p>
+  <pre class="rs">world.detect_ns()</pre>
+  <pre class="py">world.detect_ns()</pre>
+
+  <h3 id="has_device"><code>has_device</code></h3>
+  <p class="zh">创建时选了显卡，或接上过一块设备。</p>
+  <p class="en">A GPU backend was selected, or a device was attached.</p>
+  <pre class="rs">world.has_device()</pre>
+  <p class="zh py">Python 没有这个方法。</p>
+  <p class="en py">Not wrapped in Python.</p>
+
+  <h3 id="bind_device"><code>bind_device</code></h3>
+  <p class="zh">接上程序里已有的 <code>wgpu</code> 设备和队列。之后 <code>query</code> 走这块设备。<code>f64</code> 会返回错误。</p>
+  <p class="en">Attach an existing <code>wgpu</code> device and queue. Later <code>query</code> calls use that device. <code>f64</code> returns an error.</p>
+  <pre class="rs">world.bind_device(device, queue)?;</pre>
+  <p class="zh py">Python 没有这个方法。</p>
+  <p class="en py">Not wrapped in Python.</p>
+</div>
+<script>
+function setLang(lang) {
+  document.documentElement.lang = lang;
+  document.title = lang === "en" ? "Foil — API" : "Foil — 接口";
+  document.getElementById("lang").textContent = lang === "en" ? "中文" : "English";
+  try { localStorage.setItem("foil-doc-lang", lang); } catch (e) {}
+}
+function setApi(api) {
+  document.documentElement.dataset.api = api;
+  document.getElementById("api").textContent = api === "py" ? "Rust" : "Python";
+  try { localStorage.setItem("foil-doc-api", api); } catch (e) {}
+}
+document.getElementById("lang").addEventListener("click", () => {
+  setLang(document.documentElement.lang === "en" ? "zh" : "en");
+});
+document.getElementById("api").addEventListener("click", () => {
+  setApi(document.documentElement.dataset.api === "py" ? "rs" : "py");
+});
+let lang = "zh";
+let api = "rs";
+try {
+  lang = localStorage.getItem("foil-doc-lang") || "zh";
+  api = localStorage.getItem("foil-doc-api") || "rs";
+} catch (e) {}
+setLang(lang === "en" ? "en" : "zh");
+setApi(api === "py" ? "py" : "rs");
+</script>
+</body>
+</html>
