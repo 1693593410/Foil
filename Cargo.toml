@@ -1,11 +1,13 @@
 [package]
-name = "foil"
+name = "rustfoil2d"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
-repository = "https://gitee.com/longyateng/dargon"
-description = "2D grid collision: 32px cells, two chains, box and circle."
+repository = "https://github.com/1693593410/Foil"
+description = "Lightweight 2D game physics engine for rectangle and circle overlap checks."
+keywords = ["game", "physics", "collision", "2d"]
+categories = ["game-development"]
 exclude = ["python/", "examples/", "pyproject.toml", "README-pypi.md"]
 
 [lib]

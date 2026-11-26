@@ -1,6 +1,6 @@
 [package]
 name = "foil-python"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "Python bindings for the foil collision library."
 license = "MIT"
@@ -11,5 +11,5 @@ name = "foil_py"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-foil = { path = "..", features = ["gpu"] }
+rustfoil2d = { path = "..", features = ["gpu"] }
 pyo3 = { version = "0.22", features = ["extension-module"] }

@@ -55,6 +55,7 @@ pub struct Foil {
 }
 
 impl Foil {
+    /// CPU、f32，批量查询线程上限 16。
     pub fn new() -> Self {
         Self {
             bodies: Vec::new(),
@@ -82,8 +83,10 @@ impl Foil {
         }
     }
 
-    /// `cpu` 只建格子。`dx12`、`vulkan`、`metal`、`gl` 会自己开一块计算设备，`query` 走显卡。
-    /// 精度是 f32。f64 用 [`Foil::open_with`]。
+    /// 按后端创建，精度是 f32。
+    /// 名字可以是 `cpu`、`dx12`（也认 `d3d12`、`directx12`）、`vulkan`、`metal`、
+    /// `gl`（也认 `opengl`、`gles`、`angle`），以及 `wgpu`、`webgpu`、`gpu`。
+    /// 显卡查询是实验功能，传输开销目前大于收益。f64 用 [`Foil::open_with`]。
     pub fn open(backend: &str) -> Result<Self, String> {
         Self::open_with(backend, "f32")
     }
@@ -120,6 +123,7 @@ impl Foil {
         }
     }
 
+    /// 创建时选定的后端名字。某次查询改走 CPU 时，这个字符串不变。
     pub fn backend(&self) -> &str {
         &self.backend
     }

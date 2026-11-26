@@ -5,6 +5,7 @@ use super::types::*;
 use super::Foil;
 
 impl Foil {
+    /// 改中心。不存在的编号会被忽略。
     pub fn set_pose(&mut self, idx: usize, x: f64, y: f64) {
         let Some(slot) = self.slot(idx) else {
             return;
@@ -23,6 +24,7 @@ impl Foil {
         self.link_if_changed(slot);
     }
 
+    /// 读中心。编号不存在时返回 `None`。
     pub fn pose(&self, idx: usize) -> Option<(f64, f64)> {
         self.slot(idx).map(|s| self.pose_at(s))
     }
@@ -116,12 +118,12 @@ impl Foil {
         self.touch_pose();
     }
 
-    /// 放进一个物体。编号由调用方定，查询结果用这个编号。物体放好就停在那里，库不推动它。
+    /// 放进一个物体。编号由调用方指定。`x` `y` 是中心，`w` `h` 是宽高。
     ///
-    /// `shape` 只接受 `rect` 和 `circle`。`sensor` 为真时只参与检测，不挡住别人。
-    /// 写错形状返回 [`SpecError`]。
-    ///
-    /// `mask == 0` 表示碰上所有人。对方 `group == 0` 也算碰上。0 不是「谁都不碰」。
+    /// `shape` 只接受 `rect` 和 `circle`。圆的半径是宽高里较大的一半。
+    /// 形状写错，或编号放不进 32 位，返回 [`SpecError`]，物体不会放进去。
+    /// `sensor` 为真时只参与检测。`mask == 0` 碰上所有人，对方 `group == 0` 也碰上。
+    /// 0 不是「谁都不碰」。物体放好就停在那里，库不推动它。
     pub fn add(
         &mut self,
         idx: usize,
@@ -149,6 +151,7 @@ impl Foil {
         Ok(())
     }
 
+    /// 按编号删掉。编号不在世界里时什么也不做。
     pub fn remove(&mut self, idx: usize) {
         let Some(slot) = self.slot(idx) else {
             return;
@@ -163,6 +166,7 @@ impl Foil {
         self.free.push(slot as u32);
     }
 
+    /// 清空全部物体和格子。
     pub fn clear(&mut self) {
         self.bodies.clear();
         self.index.clear();
@@ -213,6 +217,7 @@ impl Foil {
         Ok(())
     }
 
+    /// 读宽高。编号不存在时返回 `None`。
     pub fn size(&self, idx: usize) -> Option<(f64, f64)> {
         self.slot(idx).map(|s| {
             let w = self.wide_at(s);
@@ -220,6 +225,7 @@ impl Foil {
         })
     }
 
+    /// 返回 `"rect"` 或 `"circle"`。编号不存在时返回 `None`。
     pub fn shape(&self, idx: usize) -> Option<&'static str> {
         self.slot(idx).map(|s| {
             if self.bodies[s].kind == KIND_CIRCLE {
@@ -230,6 +236,7 @@ impl Foil {
         })
     }
 
+    /// 改自己的分组位。不存在的编号会被忽略。
     pub fn set_group(&mut self, idx: usize, group: u32) {
         if let Some(slot) = self.slot(idx) {
             self.bodies[slot].group = group;
@@ -242,6 +249,7 @@ impl Foil {
         self.slot(idx).map(|s| self.bodies[s].group)
     }
 
+    /// 改掩码。0 表示碰上所有人。
     pub fn set_mask(&mut self, idx: usize, mask: u32) {
         if let Some(slot) = self.slot(idx) {
             self.bodies[slot].mask = mask;
@@ -254,6 +262,7 @@ impl Foil {
         self.slot(idx).map(|s| self.bodies[s].mask)
     }
 
+    /// 改成传感器或实体。传感器互相看不见，实体仍能看见传感器。
     pub fn set_sensor(&mut self, idx: usize, sensor: bool) {
         let Some(slot) = self.slot(idx) else {
             return;
@@ -274,6 +283,7 @@ impl Foil {
         self.touch_pose();
     }
 
+    /// 形状中心相对 `set_pose` 的偏移。
     pub fn set_offset(&mut self, idx: usize, ox: f64, oy: f64) {
         let Some(slot) = self.slot(idx) else {
             return;
@@ -302,14 +312,17 @@ impl Foil {
         self.bodies.iter().filter(|b| b.alive != 0).count()
     }
 
+    /// 这个编号是否还在。
     pub fn contains(&self, idx: usize) -> bool {
         self.slot(idx).is_some()
     }
 
+    /// 是否为传感器。编号不存在时返回 `false`。
     pub fn is_sensor(&self, idx: usize) -> bool {
         self.slot(idx).is_some_and(|s| self.bodies[s].sensor != 0)
     }
 
+    /// 逐个交给回调。`BodyView` 有 `id`、`x`、`y`、`is_sensor`。
     pub fn each(&self, mut f: impl FnMut(BodyView)) {
         for (slot, b) in self.bodies.iter().enumerate() {
             if b.alive == 0 {

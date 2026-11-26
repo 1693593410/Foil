@@ -10,6 +10,7 @@ use super::types::*;
 use super::Foil;
 
 impl Foil {
+    /// 用存着的位置，返回重叠到的编号。边贴着不算。传感器不会列出别的传感器。
     pub fn overlaps(&self, idx: usize) -> Vec<usize> {
         let Some((x, y)) = self.pose(idx) else {
             return Vec::new();
@@ -331,6 +332,7 @@ impl Foil {
         false
     }
 
+    /// 问这两个编号在给定中心上是否重叠。分组和形状都算。边贴着不算。
     pub fn hit(&self, a: usize, ax: f64, ay: f64, b: usize, bx: f64, by: f64) -> bool {
         if a == b {
             return false;
@@ -359,8 +361,8 @@ impl Foil {
         }
     }
 
-    /// 这一帧的 (被查询的物体, 对方)。两边都查时两对都留。
-    /// `open` 选了显卡时先走显卡，查不了再走 CPU。
+    /// 一次查很多个编号。结果是 `(被查询的编号, 对方)`。两边都在名单里时，两个方向都留。
+    /// 选了显卡且精度是 f32 时先走显卡，查不了再整次改走 CPU。显卡路径是实验功能。
     pub fn query(&mut self, indices: &[usize]) -> Vec<(usize, usize)> {
         let mut out = Vec::new();
         if self.wide || !self.query_gpu(indices, &mut out) {

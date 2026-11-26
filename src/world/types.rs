@@ -86,6 +86,7 @@ impl std::fmt::Display for SpecError {
 
 impl std::error::Error for SpecError {}
 
+/// 一次遍历里看到的物体。
 #[derive(Clone, Copy, Debug)]
 pub struct BodyView {
     pub id: usize,
