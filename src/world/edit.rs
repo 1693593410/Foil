@@ -22,6 +22,7 @@ impl Foil {
         b.y = y as f32;
         self.touch_pose();
         self.link_if_changed(slot);
+        self.refresh_solid(slot);
     }
 
     /// 读中心。编号不存在时返回 `None`。
@@ -181,6 +182,8 @@ impl Foil {
         self.gh = 0;
         self.heads.clear();
         self.extra.clear();
+        self.solid.clear();
+        self.extra_solid.clear();
         self.solid_count = 0;
         self.touch_pose();
         self.touch_grid();
@@ -214,6 +217,7 @@ impl Foil {
         b.hh = hh as f32;
         self.touch_pose();
         self.link_if_changed(slot);
+        self.refresh_solid(slot);
         Ok(())
     }
 
@@ -241,6 +245,7 @@ impl Foil {
         if let Some(slot) = self.slot(idx) {
             self.bodies[slot].group = group;
             self.touch_pose();
+            self.refresh_solid(slot);
         }
     }
 
@@ -254,6 +259,7 @@ impl Foil {
         if let Some(slot) = self.slot(idx) {
             self.bodies[slot].mask = mask;
             self.touch_pose();
+            self.refresh_solid(slot);
         }
     }
 
@@ -300,6 +306,7 @@ impl Foil {
         b.oy = oy as f32;
         self.touch_pose();
         self.link_if_changed(slot);
+        self.refresh_solid(slot);
     }
 
     /// 实体个数。传感器不算。要连传感器一起数，用 [`Foil::count`]。

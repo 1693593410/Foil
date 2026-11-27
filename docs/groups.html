@@ -203,14 +203,14 @@ world = Foil.Foil(backend="cpu", real="f32", threads=16)</pre>
   <pre class="py">world.set_pose(idx, x, y)</pre>
 
   <h3 id="move_by"><code>move_by</code></h3>
-  <p class="zh">沿这一帧的位移贴着别的实体滑，新中心直接写进世界。先水平，再竖直。空地上每轴只扫一次格子。边贴着可以停。传感器不挡人，自己也不会被挡住。返回写进去的中心。编号不存在时返回 <code>(0, 0)</code>，世界不变。</p>
-  <p class="en">Slide by this frame's displacement and store the new center. Horizontal first, then vertical. In open space each axis scans the grid once. Touching an edge is allowed. Sensors do not block and are not blocked. Returns the stored center. A missing id returns <code>(0, 0)</code> and changes nothing.</p>
+  <p class="zh">沿这一帧的位移贴着别的实体滑，新中心直接写进世界。先水平，再竖直。空地上每轴只扫一次格子。边贴着可以停。起点已经叠在别人身体里时，推到更近的贴边。传感器不挡人，自己也不会被挡住。返回写进去的中心。编号不存在时返回 <code>(0, 0)</code>，世界不变。</p>
+  <p class="en">Slide by this frame's displacement and store the new center. Horizontal first, then vertical. In open space each axis scans the grid once. Touching an edge is allowed. A center that already overlaps another body is pushed to the nearer touching edge. Sensors do not block and are not blocked. Returns the stored center. A missing id returns <code>(0, 0)</code> and changes nothing.</p>
   <pre class="rs">let (x, y) = world.move_by(id, dx, dy);</pre>
   <pre class="py">x, y = world.move_by(idx, dx, dy)</pre>
 
   <h3 id="move_many"><code>move_many</code></h3>
-  <p class="zh">同一帧移动一批。扫描、写坐标、重挂格子都并行。每个人只看见这一帧开始时的位置。墙和互不相交的物体跟逐个 <code>move_by</code> 一样。两个都在动并且路径叠在一起时，这一帧可能都走进去。少于 192 个或线程上限是 1 时，改走逐个移动。重复编号也改走逐个移动。</p>
-  <p class="en">Move a batch in one frame. The sweep, the pose write, and the grid relink all run in parallel. Each body sees positions from the start of the frame. Walls and bodies whose paths do not meet match calling <code>move_by</code> one by one. Two moving bodies whose paths cross may both enter the gap this frame. Fewer than 192 bodies, or a thread cap of 1, falls back to one-by-one moves. Duplicate ids do too.</p>
+  <p class="zh">同一帧移动一批。先一起按起点滑一遍并写回，再从各自的起点滑第二遍，第二遍看见第一遍停下的位置。起点已经在别人身体里时，这一轴停在起点。少于 192 个或线程上限是 1 时，改走逐个移动。重复编号也改走逐个移动。</p>
+  <p class="en">Move a batch in one frame. Everyone first slides from the positions at the start of the frame and the results are stored. Then everyone slides again from those same starts, this time seeing where the first slide stopped. A center that already lies inside another body stays put on that axis. Fewer than 192 bodies, or a thread cap of 1, falls back to one-by-one moves. Duplicate ids do too.</p>
   <pre class="rs">let poses = world.move_many(&amp;ids, &amp;dx, &amp;dy);</pre>
   <pre class="py"># 这一版 Python 绑定还没有 move_many</pre>
 

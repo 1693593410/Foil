@@ -200,3 +200,36 @@ use super::*;
             assert_eq!((got[i + 1].0, got[i + 1].1), (x, y));
         }
     }
+
+    #[test]
+    fn move_by_pushes_out_of_an_existing_overlap() {
+        let mut w = Foil::new();
+        put(&mut w, 1, 0.0, 0.0, 6.0, 6.0, "rect", false);
+        put(&mut w, 2, 4.0, 0.0, 6.0, 6.0, "rect", false);
+        let (x, y) = w.move_by(1, 0.0, 0.0);
+        assert_eq!((x, y), (-2.0, 0.0));
+        assert!(w.overlaps(1).is_empty(), "{:?}", w.overlaps(1));
+    }
+
+    #[test]
+    fn move_many_head_on_stays_in_list_order() {
+        let mut w = Foil::new();
+        put(&mut w, 1, 0.0, 0.0, 6.0, 6.0, "rect", false);
+        put(&mut w, 2, 20.0, 0.0, 6.0, 6.0, "rect", false);
+        let mut ids = vec![1usize, 2];
+        let mut dx = vec![30.0f64, -30.0];
+        let mut dy = vec![0.0f64, 0.0];
+        for i in 0..220 {
+            let x = 4000.0 + (i % 20) as f32 * 48.0;
+            let y = 4000.0 + (i / 20) as f32 * 48.0;
+            put(&mut w, 10 + i, x, y, 6.0, 6.0, "rect", false);
+            ids.push(10 + i);
+            dx.push(0.0);
+            dy.push(0.0);
+        }
+        let got = w.move_many(&ids, &dx, &dy);
+        assert_eq!((got[0].0, got[0].1), (0.0, 0.0));
+        assert_eq!((got[1].0, got[1].1), (20.0, 0.0));
+        assert!(w.overlaps(1).is_empty(), "{:?}", w.overlaps(1));
+        assert!(w.overlaps(2).is_empty(), "{:?}", w.overlaps(2));
+    }

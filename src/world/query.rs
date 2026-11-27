@@ -402,7 +402,7 @@ impl Foil {
         if self.bodies[slot].alive == 0 {
             return (0.0, 0.0);
         }
-        let (x, y) = self.slide_pose(slot, dx, dy);
+        let (x, y) = self.slide_pose(slot, dx, dy, true);
         let (cx, cy) = self.pose_at(slot);
         if x != cx || y != cy {
             self.set_pose(self.bodies[slot].id, x, y);
@@ -410,10 +410,55 @@ impl Foil {
         self.pose_at(slot)
     }
 
-    /// 同一帧移动一批。扫描、写坐标、重挂格子都并行。
-    /// 每个人只看见这一帧开始时的位置，所以互不遮挡的墙和远处物体跟逐个 `move_by` 一样。
-    /// 两个都在动、并且路径叠在一起的，这一帧可能都走进去。编号可以缺，重复编号会改走逐个移动。
-    /// 少于 192 个或线程上限是 1 时，直接逐个 `move_by`。
+    /// 优化前的逐个滑动：起点已经在别人身体里时停住，不往外推。
+    #[doc(hidden)]
+    pub fn move_by_held(&mut self, idx: usize, dx: f64, dy: f64) -> (f64, f64) {
+        let Some(slot) = self.slot(idx) else {
+            return (0.0, 0.0);
+        };
+        if self.bodies[slot].alive == 0 {
+            return (0.0, 0.0);
+        }
+        let (x, y) = self.slide_pose(slot, dx, dy, false);
+        let (cx, cy) = self.pose_at(slot);
+        if x != cx || y != cy {
+            self.set_pose(self.bodies[slot].id, x, y);
+        }
+        self.pose_at(slot)
+    }
+
+    /// 帧初一起算的旧路径，留给对照。同一帧互相看不见。
+    #[doc(hidden)]
+    pub fn move_many_frame_into(&mut self, ids: &[usize], dx: &[f64], dy: &[f64], out: &mut Vec<(f64, f64)>) {
+        let n = ids.len().min(dx.len()).min(dy.len());
+        out.clear();
+        if n == 0 {
+            return;
+        }
+        let threads = self.batch_threads();
+        if threads == 1 || n < QUERY_PARALLEL_AT {
+            out.reserve(n);
+            for i in 0..n {
+                out.push(self.move_by_held(ids[i], dx[i], dy[i]));
+            }
+            return;
+        }
+        let mut scratch = std::mem::take(&mut self.move_scratch);
+        if !self.plan_batch(&mut scratch, ids, dx, dy, n, false) || !self.grow_plans(&scratch.plans) {
+            self.move_scratch = scratch;
+            out.reserve(n);
+            for i in 0..n {
+                out.push(self.move_by_held(ids[i], dx[i], dy[i]));
+            }
+            return;
+        }
+        self.publish_batch(&scratch, threads);
+        out.extend(scratch.plans.iter().map(|p| (p.x, p.y)));
+        self.move_scratch = scratch;
+    }
+
+    /// 同一帧移动一批。先一起按起点滑一遍并写回，再从各自的起点滑第二遍，第二遍看见第一遍的位置。
+    /// 起点已经在别人身体里时，这一轴停在起点。少于 192 个、线程上限是 1 或编号重复时，改走逐个 `move_by`。
     pub fn move_many(&mut self, ids: &[usize], dx: &[f64], dy: &[f64]) -> Vec<(f64, f64)> {
         let mut out = Vec::new();
         self.move_many_into(ids, dx, dy, &mut out);
@@ -435,18 +480,14 @@ impl Foil {
             }
             return;
         }
-        let mut scratch = std::mem::take(&mut self.move_scratch);
-        if !self.plan_batch(&mut scratch, ids, dx, dy, n) || !self.grow_plans(&scratch.plans) {
-            self.move_scratch = scratch;
+        out.resize(n, (0.0, 0.0));
+        if !self.slide_two(ids, dx, dy, n, out) {
+            out.clear();
             out.reserve(n);
             for i in 0..n {
                 out.push(self.move_by(ids[i], dx[i], dy[i]));
             }
-            return;
         }
-        self.publish_batch(&scratch, threads);
-        out.extend(scratch.plans.iter().map(|p| (p.x, p.y)));
-        self.move_scratch = scratch;
     }
 
     fn batch_threads(&self) -> usize {
@@ -459,38 +500,348 @@ impl Foil {
         }
     }
 
-    fn slide_pose(&self, slot: usize, dx: f64, dy: f64) -> (f64, f64) {
+    /// 两遍都从本帧起点滑。第一遍只看见起点，写回后再滑一遍，第二遍看见第一遍的结果。
+    fn slide_two(&mut self, ids: &[usize], dx: &[f64], dy: &[f64], n: usize, out: &mut [(f64, f64)]) -> bool {
+        let mut origin = vec![(0.0f64, 0.0f64); n];
+        for i in 0..n {
+            if let Some(slot) = self.slot(ids[i]) {
+                if self.bodies[slot].alive != 0 {
+                    origin[i] = self.pose_at(slot);
+                }
+            }
+        }
+        let mut scratch = std::mem::take(&mut self.move_scratch);
+        if !self.plan_batch(&mut scratch, ids, dx, dy, n, false) || !self.grow_plans(&scratch.plans) {
+            self.move_scratch = scratch;
+            return false;
+        }
+        let threads = self.batch_threads();
+        self.publish_batch(&scratch, threads);
+        self.replan(&mut scratch, &dx[..n], &dy[..n], &origin, false);
+        if self.grow_plans(&scratch.plans) {
+            let threads = self.batch_threads();
+            self.publish_batch(&scratch, threads);
+        }
+        for (i, plan) in scratch.plans.iter().enumerate() {
+            out[i] = (plan.x, plan.y);
+        }
+        self.move_scratch = scratch;
+        true
+    }
+
+    /// 没换格的人按格并行，只写坐标。跨格的人按格子错开再写回。
+    #[allow(dead_code)]
+    fn tile_move(&mut self, ids: &[usize], dx: &[f64], dy: &[f64], n: usize, out: &mut [(f64, f64)]) -> bool {
+        let mut stays = Vec::new();
+        let mut cross = Vec::new();
+        let mut seen = vec![0u32; self.bodies.len()];
+        for i in 0..n {
+            let Some(slot) = self.slot(ids[i]) else {
+                continue;
+            };
+            if self.bodies[slot].alive == 0 {
+                continue;
+            }
+            if seen[slot] != 0 {
+                return false;
+            }
+            seen[slot] = 1;
+            let (c0, r0, c1, r1) = self.sweep_span(slot, dx[i], dy[i]);
+            let body = &self.bodies[slot];
+            let same = body.linked != 0
+                && c0 == c1
+                && r0 == r1
+                && body.c0 == c0
+                && body.r0 == r0
+                && body.c1 == c1
+                && body.r1 == r1;
+            if same {
+                stays.push(TileItem {
+                    index: i as u32,
+                    slot: slot as u32,
+                    dx: dx[i],
+                    dy: dy[i],
+                    c0,
+                    r0,
+                    c1,
+                    r1,
+                    nx: 0.0,
+                    ny: 0.0,
+                    nc0: 0,
+                    nr0: 0,
+                    nc1: 0,
+                    nr1: 0,
+                });
+            } else {
+                cross.push(TileItem {
+                    index: i as u32,
+                    slot: slot as u32,
+                    dx: dx[i],
+                    dy: dy[i],
+                    c0,
+                    r0,
+                    c1,
+                    r1,
+                    nx: 0.0,
+                    ny: 0.0,
+                    nc0: 0,
+                    nr0: 0,
+                    nc1: 0,
+                    nr1: 0,
+                });
+            }
+        }
+        if !stays.is_empty() {
+            stays.sort_unstable_by_key(|it| (it.c0, it.r0, it.index));
+            let mut ranges = Vec::new();
+            let mut at = 0usize;
+            while at < stays.len() {
+                let c0 = stays[at].c0;
+                let r0 = stays[at].r0;
+                let begin = at;
+                at += 1;
+                while at < stays.len() && stays[at].c0 == c0 && stays[at].r0 == r0 {
+                    at += 1;
+                }
+                ranges.push((begin, at));
+            }
+            let chunks = chunk_ranges(&ranges, self.batch_threads());
+            let world_ptr = self as *mut Foil as usize;
+            let stays_ptr = stays.as_ptr() as usize;
+            let chunks_ptr = chunks.as_ptr() as usize;
+            let job_n = chunks.len();
+            let pool = self.take_pool();
+            let run = |job: Box<dyn FnOnce() + Send + '_>| {
+                if let Some(pool) = &pool {
+                    pool.install(|| job());
+                } else {
+                    job();
+                }
+            };
+            run(Box::new(move || {
+                (0..job_n).into_par_iter().for_each(move |j| {
+                    let (begin, end) = unsafe { *(chunks_ptr as *const (usize, usize)).add(j) };
+                    let world = unsafe { &*(world_ptr as *const Foil) };
+                    let bodies = world.bodies.as_ptr() as *mut Body;
+                    let wide_ptr = world.wide_pose.as_ptr() as *mut Wide;
+                    for ord in begin..end {
+                        let it = unsafe { &*(stays_ptr as *const TileItem).add(ord) };
+                        let slot = it.slot as usize;
+                        let (x, y) = world.slide_pose(slot, it.dx, it.dy, true);
+                        let x = world.fit(x);
+                        let y = world.fit(y);
+                        unsafe {
+                            if world.wide {
+                                let w = &mut *wide_ptr.add(slot);
+                                w.x = x;
+                                w.y = y;
+                            }
+                            let body = &mut *bodies.add(slot);
+                            body.x = x as f32;
+                            body.y = y as f32;
+                        }
+                    }
+                });
+            }));
+            self.put_pool(pool);
+            for it in &stays {
+                out[it.index as usize] = self.pose_at(it.slot as usize);
+            }
+            self.touch_pose();
+        }
+        if !cross.is_empty() {
+            let sx = cross.iter().map(|it| it.c1 - it.c0 + 1).max().unwrap_or(1).max(1);
+            let sy = cross.iter().map(|it| it.r1 - it.r0 + 1).max().unwrap_or(1).max(1);
+            if sx > 6 || sy > 6 || sx * sy > 16 {
+                for it in &cross {
+                    let id = self.bodies[it.slot as usize].id;
+                    let (x, y) = self.move_by(id, it.dx, it.dy);
+                    out[it.index as usize] = (x, y);
+                }
+                return true;
+            }
+            cross.sort_unstable_by(|a, b| {
+                let ap = (a.c0.rem_euclid(sx), a.r0.rem_euclid(sy), a.c0, a.r0, a.index);
+                let bp = (b.c0.rem_euclid(sx), b.r0.rem_euclid(sy), b.c0, b.r0, b.index);
+                ap.cmp(&bp)
+            });
+            let mut scratch = std::mem::take(&mut self.move_scratch);
+            let mut pass_at = 0usize;
+            while pass_at < cross.len() {
+                let px = cross[pass_at].c0.rem_euclid(sx);
+                let py = cross[pass_at].r0.rem_euclid(sy);
+                let mut pass_end = pass_at + 1;
+                while pass_end < cross.len()
+                    && cross[pass_end].c0.rem_euclid(sx) == px
+                    && cross[pass_end].r0.rem_euclid(sy) == py
+                {
+                    pass_end += 1;
+                }
+                let mut ranges = Vec::new();
+                let mut at = pass_at;
+                while at < pass_end {
+                    let c0 = cross[at].c0;
+                    let r0 = cross[at].r0;
+                    let begin = at;
+                    at += 1;
+                    while at < pass_end && cross[at].c0 == c0 && cross[at].r0 == r0 {
+                        at += 1;
+                    }
+                    ranges.push((begin, at));
+                }
+                let chunks = chunk_ranges(&ranges, self.batch_threads());
+                let world_ptr = self as *mut Foil as usize;
+                let cross_ptr = cross.as_mut_ptr() as usize;
+                let chunks_ptr = chunks.as_ptr() as usize;
+                let job_n = chunks.len();
+                let pool = self.take_pool();
+                let run = |job: Box<dyn FnOnce() + Send + '_>| {
+                    if let Some(pool) = &pool {
+                        pool.install(|| job());
+                    } else {
+                        job();
+                    }
+                };
+                run(Box::new(move || {
+                    (0..job_n).into_par_iter().for_each(move |j| {
+                        let (begin, end) = unsafe { *(chunks_ptr as *const (usize, usize)).add(j) };
+                        let world = unsafe { &*(world_ptr as *const Foil) };
+                        let bodies = world.bodies.as_ptr() as *mut Body;
+                        let wide_ptr = world.wide_pose.as_ptr() as *mut Wide;
+                        for ord in begin..end {
+                            let it = unsafe { &mut *(cross_ptr as *mut TileItem).add(ord) };
+                            let slot = it.slot as usize;
+                            let (x, y) = world.slide_pose(slot, it.dx, it.dy, true);
+                            let x = world.fit(x);
+                            let y = world.fit(y);
+                            let span = world.span_of_pose(slot, x, y);
+                            it.nx = x;
+                            it.ny = y;
+                            it.nc0 = span.0;
+                            it.nr0 = span.1;
+                            it.nc1 = span.2;
+                            it.nr1 = span.3;
+                            unsafe {
+                                if world.wide {
+                                    let w = &mut *wide_ptr.add(slot);
+                                    w.x = x;
+                                    w.y = y;
+                                }
+                                let body = &mut *bodies.add(slot);
+                                body.x = x as f32;
+                                body.y = y as f32;
+                            }
+                        }
+                    });
+                }));
+                self.put_pool(pool);
+                scratch.plans.clear();
+                for it in &cross[pass_at..pass_end] {
+                    out[it.index as usize] = (it.nx, it.ny);
+                    let body = &self.bodies[it.slot as usize];
+                    let same = body.linked != 0
+                        && body.c0 == it.nc0
+                        && body.r0 == it.nr0
+                        && body.c1 == it.nc1
+                        && body.r1 == it.nr1;
+                    if same {
+                        continue;
+                    }
+                    scratch.plans.push(super::types::Planned {
+                        slot: it.slot,
+                        x: it.nx,
+                        y: it.ny,
+                        c0: it.nc0,
+                        r0: it.nr0,
+                        c1: it.nc1,
+                        r1: it.nr1,
+                        kind: 2,
+                    });
+                }
+                if !scratch.plans.is_empty() {
+                    if self.grow_plans(&scratch.plans) {
+                        let threads = self.batch_threads();
+                        self.publish_batch(&scratch, threads);
+                    } else {
+                        for it in &cross[pass_at..pass_end] {
+                            let id = self.bodies[it.slot as usize].id;
+                            self.set_pose(id, it.nx, it.ny);
+                        }
+                    }
+                }
+                pass_at = pass_end;
+            }
+            self.move_scratch = scratch;
+        }
+        true
+    }
+
+
+    fn sweep_span(&self, slot: usize, dx: f64, dy: f64) -> (i32, i32, i32, i32) {
+        let b = &self.bodies[slot];
+        if self.wide {
+            let w = &self.wide_pose[slot];
+            let (hx, hy) = if b.kind == KIND_CIRCLE { (w.hw, w.hw) } else { (w.hw, w.hh) };
+            let x1 = w.x + dx;
+            let y1 = w.y + dy;
+            (
+                cell_of(w.x.min(x1) + w.ox - hx, true),
+                cell_of(w.y.min(y1) + w.oy - hy, true),
+                cell_of(w.x.max(x1) + w.ox + hx, true),
+                cell_of(w.y.max(y1) + w.oy + hy, true),
+            )
+        } else {
+            let (hx, hy) = if b.kind == KIND_CIRCLE { (b.hw, b.hw) } else { (b.hw, b.hh) };
+            let x0 = b.x;
+            let y0 = b.y;
+            let x1 = self.fit(x0 as f64 + dx) as f32;
+            let y1 = self.fit(y0 as f64 + dy) as f32;
+            (
+                cell_of_f32(x0.min(x1) + b.ox - hx),
+                cell_of_f32(y0.min(y1) + b.oy - hy),
+                cell_of_f32(x0.max(x1) + b.ox + hx),
+                cell_of_f32(y0.max(y1) + b.oy + hy),
+            )
+        }
+    }
+
+    fn slide_pose(&self, slot: usize, dx: f64, dy: f64, release: bool) -> (f64, f64) {
+        let (x, y) = self.pose_at(slot);
+        self.slide_from(slot, x, y, dx, dy, release)
+    }
+
+    fn slide_from(&self, slot: usize, x0: f64, y0: f64, dx: f64, dy: f64, release: bool) -> (f64, f64) {
         if !dx.is_finite() || !dy.is_finite() {
             return self.pose_at(slot);
         }
         if self.wide {
             let w = self.wide_pose[slot];
             let b = &self.bodies[slot];
-            let x1 = w.x + dx;
-            let y1 = w.y + dy;
+            let x1 = x0 + dx;
+            let y1 = y0 + dy;
             if b.sensor != 0 {
                 return (x1, y1);
             }
-            let x = sweep_axis(self, slot, true, w.x, x1, w.y, w.ox, w.oy, w.hw, w.hh, b.kind);
-            let y = sweep_axis(self, slot, false, w.y, y1, x, w.ox, w.oy, w.hw, w.hh, b.kind);
+            let x = sweep_axis(self, slot, true, x0, x1, y0, w.ox, w.oy, w.hw, w.hh, b.kind, release);
+            let y = sweep_axis(self, slot, false, y0, y1, x, w.ox, w.oy, w.hw, w.hh, b.kind, release);
             (x, y)
         } else {
             let b = &self.bodies[slot];
-            let x0 = b.x;
-            let y0 = b.y;
+            let x0 = x0 as f32;
+            let y0 = y0 as f32;
             let x1 = self.fit(x0 as f64 + dx) as f32;
             let y1 = self.fit(y0 as f64 + dy) as f32;
             if b.sensor != 0 {
                 return (x1 as f64, y1 as f64);
             }
-            let x = sweep_axis(self, slot, true, x0, x1, y0, b.ox, b.oy, b.hw, b.hh, b.kind);
-            let y = sweep_axis(self, slot, false, y0, y1, x, b.ox, b.oy, b.hw, b.hh, b.kind);
+            let x = sweep_axis(self, slot, true, x0, x1, y0, b.ox, b.oy, b.hw, b.hh, b.kind, release);
+            let y = sweep_axis(self, slot, false, y0, y1, x, b.ox, b.oy, b.hw, b.hh, b.kind, release);
             (x as f64, y as f64)
         }
     }
 
     /// 规划失败（重复编号，或格子扩不动）时返回 false，调用方改走逐个移动。
-    fn plan_batch(&self, scratch: &mut super::types::MoveScratch, ids: &[usize], dx: &[f64], dy: &[f64], n: usize) -> bool {
+    fn plan_batch(&self, scratch: &mut super::types::MoveScratch, ids: &[usize], dx: &[f64], dy: &[f64], n: usize, release: bool) -> bool {
         scratch.plans.clear();
         scratch.plans.reserve(n);
         if scratch.seen.len() < self.bodies.len() {
@@ -555,7 +906,7 @@ impl Foil {
                     return;
                 }
                 let slot = plan.slot as usize;
-                let (x, y) = world.slide_pose(slot, dx[i], dy[i]);
+                let (x, y) = world.slide_pose(slot, dx[i], dy[i], release);
                 let (cx, cy) = world.pose_at(slot);
                 plan.x = x;
                 plan.y = y;
@@ -574,6 +925,46 @@ impl Foil {
             });
         });
         true
+    }
+
+    fn replan(
+        &self,
+        scratch: &mut super::types::MoveScratch,
+        dx: &[f64],
+        dy: &[f64],
+        origin: &[(f64, f64)],
+        release: bool,
+    ) {
+        let n = scratch.plans.len().min(dx.len()).min(dy.len()).min(origin.len());
+        let world = self;
+        let ptr = SendMut(scratch.plans.as_mut_ptr() as usize);
+        let origin = origin.as_ptr() as usize;
+        self.with_threads(|| {
+            (0..n).into_par_iter().for_each(move |i| {
+                let plan = unsafe { &mut *(ptr.0 as *mut Planned).add(i) };
+                if plan.slot == NONE {
+                    return;
+                }
+                let slot = plan.slot as usize;
+                let (x0, y0) = unsafe { *(origin as *const (f64, f64)).add(i) };
+                let (x, y) = world.slide_from(slot, x0, y0, dx[i], dy[i], release);
+                let (cx, cy) = world.pose_at(slot);
+                plan.x = x;
+                plan.y = y;
+                if x == cx && y == cy {
+                    plan.kind = 0;
+                    return;
+                }
+                let span = world.span_of_pose(slot, x, y);
+                let body = &world.bodies[slot];
+                let same = body.linked != 0 && body.c0 == span.0 && body.r0 == span.1 && body.c1 == span.2 && body.r1 == span.3;
+                plan.c0 = span.0;
+                plan.r0 = span.1;
+                plan.c1 = span.2;
+                plan.r1 = span.3;
+                plan.kind = if same { 1 } else { 2 };
+            });
+        });
     }
 
     fn grow_plans(&mut self, plans: &[super::types::Planned]) -> bool {
@@ -807,6 +1198,13 @@ impl Foil {
         }
         if relinked {
             self.touch_grid();
+            self.rebuild_solid();
+        } else if wrote {
+            for plan in &scratch.plans {
+                if plan.kind == 1 {
+                    self.refresh_solid(plan.slot as usize);
+                }
+            }
         }
         self.put_pool(pool);
     }
@@ -951,22 +1349,24 @@ fn block_interval<T: SlideNum>(
 }
 
 #[inline]
-fn clamp_travel<T: SlideNum>(start: T, goal: T, lo: T, hi: T) -> T {
-    if goal >= start {
-        if start > lo && start < hi {
+fn clamp_travel<T: SlideNum>(start: T, goal: T, lo: T, hi: T, release: bool) -> T {
+    if start > lo && start < hi {
+        if !release {
             return start;
         }
-        if goal > lo && start <= lo {
-            return lo;
+        let exit_lo = start - lo <= hi - start;
+        if exit_lo {
+            if goal <= lo { goal } else { lo }
+        } else if goal >= hi {
+            goal
+        } else {
+            hi
         }
-        goal
+    } else if goal >= start {
+        if goal > lo && start <= lo { lo } else { goal }
+    } else if goal < hi && start >= hi {
+        hi
     } else {
-        if start > lo && start < hi {
-            return start;
-        }
-        if goal < hi && start >= hi {
-            return hi;
-        }
         goal
     }
 }
@@ -1012,6 +1412,8 @@ fn empty_proxy() -> Proxy {
         bucket_next: NONE,
         owned_next: NONE,
         list: 0,
+        _pad: 0,
+        pack_at: 0,
     }
 }
 
@@ -1036,6 +1438,50 @@ fn push_stripes(ids: &mut [u8; 64], count: &mut usize, c0: i32, c1: i32) {
     }
 }
 
+fn chunk_ranges(ranges: &[(usize, usize)], threads: usize) -> Vec<(usize, usize)> {
+    let Some(&(first, _)) = ranges.first() else {
+        return Vec::new();
+    };
+    let last = ranges.last().map(|r| r.1).unwrap_or(first);
+    let total = last.saturating_sub(first);
+    if total == 0 {
+        return Vec::new();
+    }
+    let quota = (total / threads.max(1)).max(1);
+    let mut chunks = Vec::new();
+    let mut start = first;
+    let mut count = 0usize;
+    for &(begin, end) in ranges {
+        count += end - begin;
+        if count >= quota {
+            chunks.push((start, end));
+            start = end;
+            count = 0;
+        }
+    }
+    if start < last {
+        chunks.push((start, last));
+    }
+    chunks
+}
+
+struct TileItem {
+    index: u32,
+    slot: u32,
+    dx: f64,
+    dy: f64,
+    c0: i32,
+    r0: i32,
+    c1: i32,
+    r1: i32,
+    nx: f64,
+    ny: f64,
+    nc0: i32,
+    nr0: i32,
+    nc1: i32,
+    nr1: i32,
+}
+
 fn sweep_axis<T: SlideNum>(
     world: &Foil,
     slot: usize,
@@ -1048,10 +1494,8 @@ fn sweep_axis<T: SlideNum>(
     hw: T,
     hh: T,
     kind: u8,
+    release: bool,
 ) -> T {
-    if start == target {
-        return start;
-    }
     let (hx, hy) = if kind == KIND_CIRCLE { (hw, hw) } else { (hw, hh) };
     let (a_half_along, a_half_perp, a_perp) = if along_x {
         (hx, hy, perp + oy)
@@ -1072,6 +1516,7 @@ fn sweep_axis<T: SlideNum>(
         loop {
             let mut p = world.head_of(cx, cy, 0);
             let mut n = 0u32;
+            if world.wide {
             while p != NONE {
                 n += 1;
                 if n > guard {
@@ -1107,11 +1552,49 @@ fn sweep_axis<T: SlideNum>(
                             b_perp,
                             b_half_perp,
                         ) {
-                            center_goal = clamp_travel(a_center_start, center_goal, lo, hi);
+                            center_goal = clamp_travel(a_center_start, center_goal, lo, hi, release);
                         }
                     }
                 }
                 p = next;
+            }
+            } else {
+                for hit in world.solid_of(cx, cy) {
+                    let other_slot = hit.slot as usize;
+                    if other_slot == slot {
+                        continue;
+                    }
+                    let blocks = (my_mask == 0 || hit.group == 0 || (my_mask & hit.group) != 0)
+                        && (hit.mask == 0 || my_group == 0 || (hit.mask & my_group) != 0);
+                    if !blocks {
+                        continue;
+                    }
+                    let (bw, bh) = if hit.kind == KIND_CIRCLE {
+                        (T::from_f32(hit.hw), T::from_f32(hit.hw))
+                    } else {
+                        (T::from_f32(hit.hw), T::from_f32(hit.hh))
+                    };
+                    let bx = T::from_f32(hit.sx);
+                    let by = T::from_f32(hit.sy);
+                    let (b_along, b_perp, b_half_along, b_half_perp) = if along_x {
+                        (bx, by, bw, bh)
+                    } else {
+                        (by, bx, bh, bw)
+                    };
+                    if let Some((lo, hi)) = block_interval(
+                        kind,
+                        a_half_along,
+                        a_half_perp,
+                        a_perp,
+                        hit.kind,
+                        b_along,
+                        b_half_along,
+                        b_perp,
+                        b_half_perp,
+                    ) {
+                        center_goal = clamp_travel(a_center_start, center_goal, lo, hi, release);
+                    }
+                }
             }
             if cx == c1 {
                 break;

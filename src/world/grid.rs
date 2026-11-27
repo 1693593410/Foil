@@ -69,17 +69,25 @@ impl Foil {
             return false;
         }
         next.resize(area as usize, CellHeads::EMPTY);
+        let mut next_solid = Vec::new();
+        if next_solid.try_reserve_exact(area as usize).is_err() {
+            return false;
+        }
+        next_solid.resize(area as usize, Vec::new());
         if self.gw > 0 {
             for y in 0..self.gh {
                 for x in 0..self.gw {
-                    let old = self.heads[(y * self.gw + x) as usize];
+                    let i = (y * self.gw + x) as usize;
                     let nx = (self.ox + x) - nx0;
                     let ny = (self.oy + y) - ny0;
-                    next[(ny * nw + nx) as usize] = old;
+                    let ni = (ny * nw + nx) as usize;
+                    next[ni] = self.heads[i];
+                    next_solid[ni] = std::mem::take(&mut self.solid[i]);
                 }
             }
         }
         self.heads = next;
+        self.solid = next_solid;
         self.ox = nx0;
         self.oy = ny0;
         self.gw = nw;
@@ -90,6 +98,14 @@ impl Foil {
                 self.heads[i] = heads;
             } else {
                 self.extra.insert((cx, cy), heads);
+            }
+        }
+        let extra_solid = std::mem::take(&mut self.extra_solid);
+        for ((cx, cy), hits) in extra_solid {
+            if let Some(i) = self.dense_index(cx, cy) {
+                self.solid[i] = hits;
+            } else {
+                self.extra_solid.insert((cx, cy), hits);
             }
         }
         true
@@ -202,7 +218,11 @@ impl Foil {
             let cx = proxy.cx;
             let cy = proxy.cy;
             let list = proxy.list as usize;
+            let at = proxy.pack_at;
             self.unlink_bucket(cx, cy, p, list);
+            if list == 0 {
+                self.remove_solid(cx, cy, at);
+            }
             self.proxies[p as usize].bucket_next = self.free_proxy;
             self.proxies[p as usize].owned_next = NONE;
             self.free_proxy = p;
@@ -228,6 +248,8 @@ impl Foil {
                 bucket_next: NONE,
                 owned_next,
                 list,
+                _pad: 0,
+                pack_at: 0,
             });
             return p;
         };
@@ -238,6 +260,8 @@ impl Foil {
             bucket_next: NONE,
             owned_next,
             list,
+            _pad: 0,
+            pack_at: 0,
         };
         p
     }
@@ -255,6 +279,11 @@ impl Foil {
                 self.ensure_cell(cx, cy);
                 self.proxies[p as usize].bucket_next = self.head_of(cx, cy, li);
                 self.set_head(cx, cy, li, p);
+                if list == 0 && !self.wide {
+                    let hit = self.solid_hit(slot, p);
+                    let at = self.push_solid(cx, cy, hit);
+                    self.proxies[p as usize].pack_at = at;
+                }
                 owned = p;
                 if cx == c1 {
                     break;
@@ -274,6 +303,158 @@ impl Foil {
         b.r1 = r1;
         b.linked = 1;
         self.touch_grid();
+    }
+
+    fn solid_hit(&self, slot: usize, proxy: u32) -> SolidHit {
+        let b = &self.bodies[slot];
+        SolidHit {
+            proxy,
+            slot: slot as u32,
+            sx: b.x + b.ox,
+            sy: b.y + b.oy,
+            hw: b.hw,
+            hh: b.hh,
+            group: b.group,
+            mask: b.mask,
+            kind: b.kind,
+        }
+    }
+
+    fn push_solid(&mut self, cx: i32, cy: i32, hit: SolidHit) -> u16 {
+        let idx = self.dense_index(cx, cy);
+        let vec = if let Some(i) = idx {
+            if i < self.solid.len() {
+                &mut self.solid[i]
+            } else {
+                self.extra_solid.entry((cx, cy)).or_default()
+            }
+        } else {
+            self.extra_solid.entry((cx, cy)).or_default()
+        };
+        let at = vec.len();
+        vec.push(hit);
+        at as u16
+    }
+
+    fn remove_solid(&mut self, cx: i32, cy: i32, at: u16) {
+        let idx = self.dense_index(cx, cy);
+        let at = at as usize;
+        let moved = if let Some(i) = idx.filter(|&i| i < self.solid.len()) {
+            let vec = &mut self.solid[i];
+            if at >= vec.len() {
+                return;
+            }
+            vec.swap_remove(at);
+            if at < vec.len() { Some(vec[at].proxy) } else { None }
+        } else if let Some(vec) = self.extra_solid.get_mut(&(cx, cy)) {
+            if at >= vec.len() {
+                return;
+            }
+            vec.swap_remove(at);
+            if at < vec.len() { Some(vec[at].proxy) } else { None }
+        } else {
+            return;
+        };
+        if let Some(moved) = moved {
+            self.proxies[moved as usize].pack_at = at as u16;
+        }
+    }
+
+    pub(super) fn refresh_solid(&mut self, slot: usize) {
+        if self.wide {
+            return;
+        }
+        let b = &self.bodies[slot];
+        if b.sensor != 0 || b.linked == 0 {
+            return;
+        }
+        let sx = b.x + b.ox;
+        let sy = b.y + b.oy;
+        let hw = b.hw;
+        let hh = b.hh;
+        let group = b.group;
+        let mask = b.mask;
+        let kind = b.kind;
+        let mut p = b.proxy;
+        let guard = self.proxies.len() as u32 + 1;
+        let mut n = 0u32;
+        while p != NONE {
+            n += 1;
+            if n > guard {
+                return;
+            }
+            let proxy = &self.proxies[p as usize];
+            let next = proxy.owned_next;
+            let cx = proxy.cx;
+            let cy = proxy.cy;
+            let list = proxy.list;
+            let at = proxy.pack_at as usize;
+            if list == 0 {
+                let idx = self.dense_index(cx, cy);
+                let hit = if let Some(i) = idx {
+                    self.solid.get_mut(i).and_then(|v| v.get_mut(at))
+                } else {
+                    self.extra_solid.get_mut(&(cx, cy)).and_then(|v| v.get_mut(at))
+                };
+                if let Some(hit) = hit {
+                    hit.sx = sx;
+                    hit.sy = sy;
+                    hit.hw = hw;
+                    hit.hh = hh;
+                    hit.group = group;
+                    hit.mask = mask;
+                    hit.kind = kind;
+                }
+            }
+            p = next;
+        }
+    }
+
+    pub(super) fn rebuild_solid(&mut self) {
+        if self.wide {
+            return;
+        }
+        for v in &mut self.solid {
+            v.clear();
+        }
+        for v in self.extra_solid.values_mut() {
+            v.clear();
+        }
+        let n = self.bodies.len();
+        for slot in 0..n {
+            let b = &self.bodies[slot];
+            if b.alive == 0 || b.sensor != 0 || b.linked == 0 {
+                continue;
+            }
+            let mut p = b.proxy;
+            let guard = self.proxies.len() as u32 + 1;
+            let mut steps = 0u32;
+            while p != NONE {
+                steps += 1;
+                if steps > guard {
+                    break;
+                }
+                let proxy = &self.proxies[p as usize];
+                let next = proxy.owned_next;
+                let cx = proxy.cx;
+                let cy = proxy.cy;
+                let list = proxy.list;
+                if list == 0 {
+                    let hit = self.solid_hit(slot, p);
+                    let at = self.push_solid(cx, cy, hit);
+                    self.proxies[p as usize].pack_at = at;
+                }
+                p = next;
+            }
+        }
+    }
+
+    pub(super) fn solid_of(&self, cx: i32, cy: i32) -> &[SolidHit] {
+        if let Some(i) = self.dense_index(cx, cy) {
+            self.solid.get(i).map(|v| v.as_slice()).unwrap_or(&[])
+        } else {
+            self.extra_solid.get(&(cx, cy)).map(|v| v.as_slice()).unwrap_or(&[])
+        }
     }
 
     pub(super) fn link_if_changed(&mut self, slot: usize) {
@@ -524,6 +705,8 @@ unsafe fn alloc_raw(g: GridPtrs, alloc: &mut ProxyAlloc, slot: u32, cx: i32, cy:
             bucket_next: NONE,
             owned_next,
             list,
+            _pad: 0,
+            pack_at: 0,
         };
         p
     }

@@ -16,7 +16,7 @@ pub use types::{BodyView, SpecError};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use types::{Body, CellHeads, MoveScratch, Proxy, Wide, NONE};
+use types::{Body, CellHeads, MoveScratch, Proxy, SolidHit, Wide, NONE};
 
 /// 少于这么多个物体时，拆线程的开销比查询本身还大，走单线程。
 pub(super) const QUERY_PARALLEL_AT: usize = 192;
@@ -41,6 +41,9 @@ pub struct Foil {
     gh: i32,
     heads: Vec<CellHeads>,
     extra: HashMap<(i32, i32), CellHeads>,
+    /// 和密铺格子对齐的实体邻居。查询不读它。
+    solid: Vec<Vec<SolidHit>>,
+    extra_solid: HashMap<(i32, i32), Vec<SolidHit>>,
     solid_count: usize,
     /// CPU 上改过显卡要看的形状或坐标。显卡缓存用它决定要不要重传物体。
     pub(crate) pose_gen: u64,
@@ -74,6 +77,8 @@ impl Foil {
             gh: 0,
             heads: Vec::new(),
             extra: HashMap::new(),
+            solid: Vec::new(),
+            extra_solid: HashMap::new(),
             solid_count: 0,
             pose_gen: 1,
             grid_gen: 1,

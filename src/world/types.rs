@@ -46,6 +46,7 @@ impl Wide {
 }
 
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub(super) struct Proxy {
     pub(super) slot: u32,
     pub(super) cx: i32,
@@ -54,6 +55,23 @@ pub(super) struct Proxy {
     pub(super) owned_next: u32,
     /// 0 实体链，1 sensor 链。卸下时要知道从哪条链摘。
     pub(super) list: u8,
+    pub(super) _pad: u8,
+    /// 这一格连续邻居表里的下标。只在实体链上有意义。
+    pub(super) pack_at: u16,
+}
+
+/// 一格里排好的实体，滑动时顺序读，不再顺着链表跳。
+#[derive(Clone, Copy)]
+pub(super) struct SolidHit {
+    pub(super) proxy: u32,
+    pub(super) slot: u32,
+    pub(super) sx: f32,
+    pub(super) sy: f32,
+    pub(super) hw: f32,
+    pub(super) hh: f32,
+    pub(super) group: u32,
+    pub(super) mask: u32,
+    pub(super) kind: u8,
 }
 
 #[derive(Clone, Copy)]
