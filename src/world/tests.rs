@@ -166,3 +166,37 @@ use super::*;
         assert_eq!((x, y), (25.0, 0.0));
         assert!(w.overlaps(1).is_empty(), "{:?}", w.overlaps(1));
     }
+
+    #[test]
+    fn move_many_stops_on_the_wall_and_keeps_other_cells() {
+        let mut parallel = Foil::new();
+        let mut serial = Foil::new();
+        put(&mut parallel, 0, 100.0, 0.0, 32.0, 32.0, "rect", false);
+        put(&mut serial, 0, 100.0, 0.0, 32.0, 32.0, "rect", false);
+        put(&mut parallel, 1, 0.0, 0.0, 20.0, 20.0, "rect", false);
+        put(&mut serial, 1, 0.0, 0.0, 20.0, 20.0, "rect", false);
+        put(&mut parallel, 2, -400.0, -400.0, 16.0, 16.0, "rect", false);
+        put(&mut parallel, 3, -400.0, -400.0, 8.0, 8.0, "circle", true);
+        let mut ids = vec![1usize];
+        let mut dx = vec![200.0f64];
+        let mut dy = vec![0.0f64];
+        for i in 0..220 {
+            let x = 2400.0 + (i % 20) as f32 * 48.0;
+            let y = 2400.0 + (i / 20) as f32 * 48.0;
+            put(&mut parallel, 10 + i, x, y, 6.0, 6.0, "rect", false);
+            put(&mut serial, 10 + i, x, y, 6.0, 6.0, "rect", false);
+            ids.push(10 + i);
+            dx.push(1.0);
+            dy.push(-0.5);
+        }
+        let got = parallel.move_many(&ids, &dx, &dy);
+        assert_eq!((got[0].0, got[0].1), (74.0, 0.0));
+        assert!(parallel.overlaps(1).is_empty(), "{:?}", parallel.overlaps(1));
+        assert!(parallel.overlaps(3).contains(&2), "格子被并行写坏了 {:?}", parallel.overlaps(3));
+        let again = parallel.move_many(&ids, &dx, &dy);
+        assert_eq!((again[0].0, again[0].1), (74.0, 0.0));
+        for i in 0..220 {
+            let (x, y) = serial.move_by(10 + i, 1.0, -0.5);
+            assert_eq!((got[i + 1].0, got[i + 1].1), (x, y));
+        }
+    }

@@ -16,7 +16,7 @@ pub use types::{BodyView, SpecError};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use types::{Body, CellHeads, Proxy, Wide, NONE};
+use types::{Body, CellHeads, MoveScratch, Proxy, Wide, NONE};
 
 /// 少于这么多个物体时，拆线程的开销比查询本身还大，走单线程。
 pub(super) const QUERY_PARALLEL_AT: usize = 192;
@@ -50,6 +50,8 @@ pub struct Foil {
     /// `0` 不封顶。`1` 强制单线程。其余是查询最多开这么多线程。
     thread_limit: usize,
     thread_pool: Mutex<Option<rayon::ThreadPool>>,
+    move_scratch: MoveScratch,
+    move_stripes: Vec<Mutex<()>>,
     #[cfg(feature = "gpu")]
     gpu: Option<gpu::FoilGpu>,
 }
@@ -78,6 +80,8 @@ impl Foil {
             backend: "cpu".into(),
             thread_limit: DEFAULT_THREADS,
             thread_pool: Mutex::new(None),
+            move_scratch: MoveScratch::default(),
+            move_stripes: (0..64).map(|_| Mutex::new(())).collect(),
             #[cfg(feature = "gpu")]
             gpu: None,
         }

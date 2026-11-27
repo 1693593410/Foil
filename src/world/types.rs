@@ -45,6 +45,7 @@ impl Wide {
     pub(super) const ZERO: Self = Self { x: 0.0, y: 0.0, ox: 0.0, oy: 0.0, hw: 0.0, hh: 0.0 };
 }
 
+#[derive(Clone, Copy)]
 pub(super) struct Proxy {
     pub(super) slot: u32,
     pub(super) cx: i32,
@@ -53,6 +54,35 @@ pub(super) struct Proxy {
     pub(super) owned_next: u32,
     /// 0 实体链，1 sensor 链。卸下时要知道从哪条链摘。
     pub(super) list: u8,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct Planned {
+    pub(super) slot: u32,
+    pub(super) x: f64,
+    pub(super) y: f64,
+    pub(super) c0: i32,
+    pub(super) r0: i32,
+    pub(super) c1: i32,
+    pub(super) r1: i32,
+    /// 0 坐标没变，1 只改坐标，2 格子也要重挂。
+    pub(super) kind: u8,
+}
+
+pub(super) struct MoveScratch {
+    pub(super) plans: Vec<Planned>,
+    pub(super) seen: Vec<u32>,
+    pub(super) seen_gen: u32,
+}
+
+impl Default for MoveScratch {
+    fn default() -> Self {
+        Self {
+            plans: Vec::new(),
+            seen: Vec::new(),
+            seen_gen: 0,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
