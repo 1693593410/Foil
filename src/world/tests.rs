@@ -131,3 +131,38 @@ use super::*;
         assert!(!wide.overlaps(1).contains(&2));
         assert!(Foil::open_with("dx12", "f64").is_err());
     }
+
+    #[test]
+    fn move_by_slides_on_contact_and_lets_sensors_through() {
+        let mut w = Foil::new();
+        put(&mut w, 0, 100.0, 0.0, 32.0, 32.0, "rect", false);
+        put(&mut w, 1, 0.0, 0.0, 20.0, 20.0, "rect", false);
+        let (x, y) = w.move_by(1, 200.0, 0.0);
+        assert_eq!((x, y), (74.0, 0.0));
+        assert!(w.overlaps(1).is_empty(), "{:?}", w.overlaps(1));
+
+        let (x, y) = w.move_by(1, 30.0, 80.0);
+        assert_eq!((x, y), (74.0, 80.0), "贴着墙时竖直还能走");
+
+        put(&mut w, 2, 74.0, 200.0, 20.0, 32.0, "rect", false);
+        let (x, y) = w.move_by(1, 0.0, 200.0);
+        assert_eq!((x, y), (74.0, 174.0));
+        assert!(w.overlaps(1).is_empty(), "{:?}", w.overlaps(1));
+
+        put(&mut w, 3, 0.0, 40.0, 10.0, 10.0, "circle", true);
+        let (x, y) = w.move_by(3, 100.0, -40.0);
+        assert_eq!((x, y), (100.0, 0.0));
+        assert!(w.overlaps(3).contains(&0));
+
+        assert_eq!(w.move_by(9, 1.0, 1.0), (0.0, 0.0));
+    }
+
+    #[test]
+    fn move_by_circle_stops_on_the_touching_line() {
+        let mut w = Foil::new();
+        put(&mut w, 0, 40.0, 0.0, 20.0, 20.0, "rect", false);
+        put(&mut w, 1, 0.0, 0.0, 10.0, 10.0, "circle", false);
+        let (x, y) = w.move_by(1, 100.0, 0.0);
+        assert_eq!((x, y), (25.0, 0.0));
+        assert!(w.overlaps(1).is_empty(), "{:?}", w.overlaps(1));
+    }

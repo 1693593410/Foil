@@ -102,6 +102,7 @@
       <li><a href="#remove">remove</a></li>
       <li><a href="#clear">clear</a></li>
       <li><a href="#set_pose">set_pose</a></li>
+      <li><a href="#move_by">move_by</a></li>
       <li><a href="#pose">pose</a></li>
       <li><a href="#set_size">set_size</a></li>
       <li><a href="#size">size</a></li>
@@ -199,6 +200,12 @@ world = Foil.Foil(backend="cpu", real="f32", threads=16)</pre>
   <p class="en">Move the center. A missing id is ignored.</p>
   <pre class="rs">world.set_pose(id, x, y);</pre>
   <pre class="py">world.set_pose(idx, x, y)</pre>
+
+  <h3 id="move_by"><code>move_by</code></h3>
+  <p class="zh">沿这一帧的位移贴着别的实体滑，新中心直接写进世界。先水平，再竖直。空地上每轴只扫一次格子。边贴着可以停。传感器不挡人，自己也不会被挡住。返回写进去的中心。编号不存在时返回 <code>(0, 0)</code>，世界不变。</p>
+  <p class="en">Slide by this frame's displacement and store the new center. Horizontal first, then vertical. In open space each axis scans the grid once. Touching an edge is allowed. Sensors do not block and are not blocked. Returns the stored center. A missing id returns <code>(0, 0)</code> and changes nothing.</p>
+  <pre class="rs">let (x, y) = world.move_by(id, dx, dy);</pre>
+  <pre class="py">x, y = world.move_by(idx, dx, dy)</pre>
 
   <h3 id="pose"><code>pose</code></h3>
   <p class="zh">读中心。编号不存在时返回 <code>None</code>。</p>

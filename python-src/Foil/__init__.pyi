@@ -64,6 +64,13 @@ class Foil:
     def set_pose(self, idx: int, x: float, y: float) -> None:
         """改中心。不存在的编号会被忽略。"""
 
+    def move_by(self, idx: int, dx: float, dy: float) -> tuple[float, float]:
+        """沿位移贴着别的实体滑，并写进新中心。先水平，再竖直。
+
+        空地上每轴只扫一次格子。边贴着可以停。传感器不挡人，自己也不会被挡住。
+        编号不存在时返回 (0, 0)，世界不变。
+        """
+
     def pose(self, idx: int) -> tuple[float, float] | None:
         """读中心。编号不存在时返回 None。"""
 

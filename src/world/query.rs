@@ -4,7 +4,7 @@ use std::cell::RefCell;
 
 use rayon::prelude::*;
 
-use super::grid::{cell_range, cell_span_f32};
+use super::grid::{cell_of, cell_of_f32, cell_range, cell_span_f32};
 use super::QUERY_PARALLEL_AT;
 use super::types::*;
 use super::Foil;
@@ -372,6 +372,53 @@ impl Foil {
         out
     }
 
+    /// 沿位移贴着别的实体滑，并把新中心写进去。先水平，再竖直。
+    /// 空地上每轴只扫一次格子。边贴着可以停。传感器不挡人，自己也不会被挡住。
+    /// 编号不存在时返回 `(0, 0)`，世界不变。
+    pub fn move_by(&mut self, idx: usize, dx: f64, dy: f64) -> (f64, f64) {
+        let Some(slot) = self.slot(idx) else {
+            return (0.0, 0.0);
+        };
+        if self.bodies[slot].alive == 0 {
+            return (0.0, 0.0);
+        }
+        if !dx.is_finite() || !dy.is_finite() {
+            return self.pose_at(slot);
+        }
+        let (x, y) = if self.wide {
+            let w = self.wide_pose[slot];
+            let b = &self.bodies[slot];
+            let x1 = w.x + dx;
+            let y1 = w.y + dy;
+            if b.sensor != 0 {
+                (x1, y1)
+            } else {
+                let x = sweep_axis(self, slot, true, w.x, x1, w.y, w.ox, w.oy, w.hw, w.hh, b.kind);
+                let y = sweep_axis(self, slot, false, w.y, y1, x, w.ox, w.oy, w.hw, w.hh, b.kind);
+                (x, y)
+            }
+        } else {
+            let b = &self.bodies[slot];
+            let x0 = b.x;
+            let y0 = b.y;
+            let x1 = self.fit(x0 as f64 + dx) as f32;
+            let y1 = self.fit(y0 as f64 + dy) as f32;
+            if b.sensor != 0 {
+                (x1 as f64, y1 as f64)
+            } else {
+                let x = sweep_axis(self, slot, true, x0, x1, y0, b.ox, b.oy, b.hw, b.hh, b.kind);
+                let y = sweep_axis(self, slot, false, y0, y1, x, b.ox, b.oy, b.hw, b.hh, b.kind);
+                (x as f64, y as f64)
+            }
+        };
+        let id = self.bodies[slot].id;
+        let (cx, cy) = self.pose_at(slot);
+        if x != cx || y != cy {
+            self.set_pose(id, x, y);
+        }
+        self.pose_at(slot)
+    }
+
     pub(super) fn query_gpu(&mut self, indices: &[usize], out: &mut Vec<(usize, usize)>) -> bool {
         #[cfg(feature = "gpu")]
         {
@@ -388,6 +435,248 @@ impl Foil {
             false
         }
     }
+}
+
+trait SlideNum: Copy + PartialOrd + std::ops::Add<Output = Self> + std::ops::Sub<Output = Self> + std::ops::Mul<Output = Self> {
+    fn from_f32(v: f32) -> Self;
+    fn from_f64(v: f64) -> Self;
+    fn sqrt(self) -> Self;
+    fn abs(self) -> Self;
+    fn min_num(self, other: Self) -> Self;
+    fn max_num(self, other: Self) -> Self;
+    fn cell(self, wide: bool) -> i32;
+}
+
+impl SlideNum for f32 {
+    #[inline]
+    fn from_f32(v: f32) -> Self { v }
+    #[inline]
+    fn from_f64(v: f64) -> Self { v as f32 }
+    #[inline]
+    fn sqrt(self) -> Self { f32::sqrt(self) }
+    #[inline]
+    fn abs(self) -> Self { f32::abs(self) }
+    #[inline]
+    fn min_num(self, other: Self) -> Self { f32::min(self, other) }
+    #[inline]
+    fn max_num(self, other: Self) -> Self { f32::max(self, other) }
+    #[inline]
+    fn cell(self, _: bool) -> i32 { cell_of_f32(self) }
+}
+
+impl SlideNum for f64 {
+    #[inline]
+    fn from_f32(v: f32) -> Self { v as f64 }
+    #[inline]
+    fn from_f64(v: f64) -> Self { v }
+    #[inline]
+    fn sqrt(self) -> Self { f64::sqrt(self) }
+    #[inline]
+    fn abs(self) -> Self { f64::abs(self) }
+    #[inline]
+    fn min_num(self, other: Self) -> Self { f64::min(self, other) }
+    #[inline]
+    fn max_num(self, other: Self) -> Self { f64::max(self, other) }
+    #[inline]
+    fn cell(self, wide: bool) -> i32 { cell_of(self, wide) }
+}
+
+#[inline]
+fn slide_clamp<T: SlideNum>(v: T, lo: T, hi: T) -> T {
+    if v < lo { lo } else if v > hi { hi } else { v }
+}
+
+/// 形状中心在运动轴上落进 `(lo, hi)` 才重叠。刚好贴边可以停。
+#[inline]
+fn block_interval<T: SlideNum>(
+    ak: u8,
+    a_half_along: T,
+    a_half_perp: T,
+    a_perp: T,
+    bk: u8,
+    b_along: T,
+    b_half_along: T,
+    b_perp: T,
+    b_half_perp: T,
+) -> Option<(T, T)> {
+    let gap = match (ak, bk) {
+        (KIND_RECT, KIND_RECT) => {
+            if (a_perp - b_perp).abs() >= a_half_perp + b_half_perp {
+                return None;
+            }
+            a_half_along + b_half_along
+        }
+        (KIND_CIRCLE, KIND_CIRCLE) => {
+            let dy = a_perp - b_perp;
+            let r = a_half_along + b_half_along;
+            if dy * dy >= r * r {
+                return None;
+            }
+            (r * r - dy * dy).sqrt()
+        }
+        (KIND_RECT, KIND_CIRCLE) => {
+            let py = slide_clamp(b_perp, a_perp - a_half_perp, a_perp + a_half_perp);
+            let dy = b_perp - py;
+            let r = b_half_along;
+            if dy * dy >= r * r {
+                return None;
+            }
+            a_half_along + (r * r - dy * dy).sqrt()
+        }
+        _ => {
+            let py = slide_clamp(a_perp, b_perp - b_half_perp, b_perp + b_half_perp);
+            let dy = a_perp - py;
+            let r = a_half_along;
+            if dy * dy >= r * r {
+                return None;
+            }
+            b_half_along + (r * r - dy * dy).sqrt()
+        }
+    };
+    Some((b_along - gap, b_along + gap))
+}
+
+#[inline]
+fn clamp_travel<T: SlideNum>(start: T, goal: T, lo: T, hi: T) -> T {
+    if goal >= start {
+        if start > lo && start < hi {
+            return start;
+        }
+        if goal > lo && start <= lo {
+            return lo;
+        }
+        goal
+    } else {
+        if start > lo && start < hi {
+            return start;
+        }
+        if goal < hi && start >= hi {
+            return hi;
+        }
+        goal
+    }
+}
+
+fn sweep_axis<T: SlideNum>(
+    world: &Foil,
+    slot: usize,
+    along_x: bool,
+    start: T,
+    target: T,
+    perp: T,
+    ox: T,
+    oy: T,
+    hw: T,
+    hh: T,
+    kind: u8,
+) -> T {
+    if start == target {
+        return start;
+    }
+    let (hx, hy) = if kind == KIND_CIRCLE { (hw, hw) } else { (hw, hh) };
+    let (a_half_along, a_half_perp, a_perp) = if along_x {
+        (hx, hy, perp + oy)
+    } else {
+        (hy, hx, perp + ox)
+    };
+    let a_center_start = if along_x { start + ox } else { start + oy };
+    let (c0, r0, c1, r1) = swept_cells(along_x, start, target, perp, ox, oy, hx, hy, world.wide);
+    let (my_group, my_mask) = {
+        let me = &world.bodies[slot];
+        (me.group, me.mask)
+    };
+    let guard = world.proxies.len() as u32 + 1;
+    let mut center_goal = if along_x { target + ox } else { target + oy };
+    let mut cy = r0;
+    loop {
+        let mut cx = c0;
+        loop {
+            let mut p = world.head_of(cx, cy, 0);
+            let mut n = 0u32;
+            while p != NONE {
+                n += 1;
+                if n > guard {
+                    break;
+                }
+                let proxy = &world.proxies[p as usize];
+                let next = proxy.bucket_next;
+                let other_slot = proxy.slot as usize;
+                if other_slot != slot {
+                    let (alive, sensor, other_kind, group, mask) = {
+                        let other = &world.bodies[other_slot];
+                        (other.alive, other.sensor, other.kind, other.group, other.mask)
+                    };
+                    let hit = alive != 0
+                        && sensor == 0
+                        && (my_mask == 0 || group == 0 || (my_mask & group) != 0)
+                        && (mask == 0 || my_group == 0 || (mask & my_group) != 0);
+                    if hit {
+                        let (bx, by, bw, bh) = other_shape::<T>(world, other_slot);
+                        let (b_along, b_perp, b_half_along, b_half_perp) = if along_x {
+                            (bx, by, bw, bh)
+                        } else {
+                            (by, bx, bh, bw)
+                        };
+                        if let Some((lo, hi)) = block_interval(
+                            kind,
+                            a_half_along,
+                            a_half_perp,
+                            a_perp,
+                            other_kind,
+                            b_along,
+                            b_half_along,
+                            b_perp,
+                            b_half_perp,
+                        ) {
+                            center_goal = clamp_travel(a_center_start, center_goal, lo, hi);
+                        }
+                    }
+                }
+                p = next;
+            }
+            if cx == c1 {
+                break;
+            }
+            cx += 1;
+        }
+        if cy == r1 {
+            break;
+        }
+        cy += 1;
+    }
+    if along_x { center_goal - ox } else { center_goal - oy }
+}
+
+fn other_shape<T: SlideNum>(world: &Foil, slot: usize) -> (T, T, T, T) {
+    let kind = world.bodies[slot].kind;
+    let (x, y, ox, oy, hw, hh) = if world.wide {
+        let w = &world.wide_pose[slot];
+        (T::from_f64(w.x), T::from_f64(w.y), T::from_f64(w.ox), T::from_f64(w.oy), T::from_f64(w.hw), T::from_f64(w.hh))
+    } else {
+        let body = &world.bodies[slot];
+        (T::from_f32(body.x), T::from_f32(body.y), T::from_f32(body.ox), T::from_f32(body.oy), T::from_f32(body.hw), T::from_f32(body.hh))
+    };
+    let (hx, hy) = if kind == KIND_CIRCLE { (hw, hw) } else { (hw, hh) };
+    (x + ox, y + oy, hx, hy)
+}
+
+fn swept_cells<T: SlideNum>(
+    along_x: bool,
+    start: T,
+    target: T,
+    perp: T,
+    ox: T,
+    oy: T,
+    hx: T,
+    hy: T,
+    wide: bool,
+) -> (i32, i32, i32, i32) {
+    let (x0, x1, y0, y1) = if along_x {
+        (start.min_num(target) + ox - hx, start.max_num(target) + ox + hx, perp + oy - hy, perp + oy + hy)
+    } else {
+        (perp + ox - hx, perp + ox + hx, start.min_num(target) + oy - hy, start.max_num(target) + oy + hy)
+    };
+    (x0.cell(wide), y0.cell(wide), x1.cell(wide), y1.cell(wide))
 }
 
 /// `mask == 0` 碰上所有人。对方 `group == 0` 也碰上。两边都要过。

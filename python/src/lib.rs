@@ -90,6 +90,12 @@ impl FoilPy {
         self.world.set_pose(idx, x, y);
     }
 
+    /// 沿位移贴着别的实体滑，并写进新中心。先水平，再竖直。
+    /// 编号不存在时返回 (0, 0)。
+    fn move_by(&mut self, idx: usize, dx: f64, dy: f64) -> (f64, f64) {
+        self.world.move_by(idx, dx, dy)
+    }
+
     /// 读中心。编号不存在时返回 None。
     fn pose(&self, idx: usize) -> Option<(f64, f64)> {
         self.world.pose(idx)
