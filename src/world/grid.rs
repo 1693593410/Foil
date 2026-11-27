@@ -360,6 +360,44 @@ impl Foil {
         }
     }
 
+    pub(super) fn nudge_solid_center(&mut self, slot: usize, sx: f32, sy: f32) {
+        if self.wide {
+            return;
+        }
+        let b = &self.bodies[slot];
+        if b.sensor != 0 || b.linked == 0 {
+            return;
+        }
+        let mut p = b.proxy;
+        let guard = self.proxies.len() as u32 + 1;
+        let mut n = 0u32;
+        while p != NONE {
+            n += 1;
+            if n > guard {
+                return;
+            }
+            let proxy = &self.proxies[p as usize];
+            let next = proxy.owned_next;
+            let cx = proxy.cx;
+            let cy = proxy.cy;
+            let list = proxy.list;
+            let at = proxy.pack_at as usize;
+            if list == 0 {
+                let idx = self.dense_index(cx, cy);
+                let hit = if let Some(i) = idx {
+                    self.solid.get_mut(i).and_then(|v| v.get_mut(at))
+                } else {
+                    self.extra_solid.get_mut(&(cx, cy)).and_then(|v| v.get_mut(at))
+                };
+                if let Some(hit) = hit {
+                    hit.sx = sx;
+                    hit.sy = sy;
+                }
+            }
+            p = next;
+        }
+    }
+
     pub(super) fn refresh_solid(&mut self, slot: usize) {
         if self.wide {
             return;
@@ -407,45 +445,6 @@ impl Foil {
                 }
             }
             p = next;
-        }
-    }
-
-    pub(super) fn rebuild_solid(&mut self) {
-        if self.wide {
-            return;
-        }
-        for v in &mut self.solid {
-            v.clear();
-        }
-        for v in self.extra_solid.values_mut() {
-            v.clear();
-        }
-        let n = self.bodies.len();
-        for slot in 0..n {
-            let b = &self.bodies[slot];
-            if b.alive == 0 || b.sensor != 0 || b.linked == 0 {
-                continue;
-            }
-            let mut p = b.proxy;
-            let guard = self.proxies.len() as u32 + 1;
-            let mut steps = 0u32;
-            while p != NONE {
-                steps += 1;
-                if steps > guard {
-                    break;
-                }
-                let proxy = &self.proxies[p as usize];
-                let next = proxy.owned_next;
-                let cx = proxy.cx;
-                let cy = proxy.cy;
-                let list = proxy.list;
-                if list == 0 {
-                    let hit = self.solid_hit(slot, p);
-                    let at = self.push_solid(cx, cy, hit);
-                    self.proxies[p as usize].pack_at = at;
-                }
-                p = next;
-            }
         }
     }
 
@@ -557,157 +556,3 @@ pub(super) fn cell_range(x: f64, y: f64, ox: f64, oy: f64, hw: f64, hh: f64, kin
     )
 }
 
-#[derive(Clone, Copy)]
-pub(super) struct GridPtrs {
-    pub(super) bodies: *mut Body,
-    pub(super) proxies: *mut Proxy,
-    pub(super) heads: *mut CellHeads,
-    pub(super) ox: i32,
-    pub(super) oy: i32,
-    pub(super) gw: i32,
-    pub(super) gh: i32,
-}
-
-unsafe impl Send for GridPtrs {}
-unsafe impl Sync for GridPtrs {}
-
-pub(super) struct ProxyAlloc {
-    pub(super) next: u32,
-    pub(super) end: u32,
-    pub(super) local_free: u32,
-}
-
-#[inline]
-fn dense_slot(g: GridPtrs, cx: i32, cy: i32) -> Option<usize> {
-    if g.gw <= 0 {
-        return None;
-    }
-    let x = cx.wrapping_sub(g.ox);
-    let y = cy.wrapping_sub(g.oy);
-    if x < 0 || y < 0 || x >= g.gw || y >= g.gh {
-        None
-    } else {
-        Some((y * g.gw + x) as usize)
-    }
-}
-
-/// 调用方保证：同一格同一时刻只有一个线程进来，代理下标不和别的线程重叠。
-pub(super) unsafe fn relink_planned(g: GridPtrs, alloc: &mut ProxyAlloc, slot: usize, span: (i32, i32, i32, i32)) {
-    unsafe {
-        unlink_raw(g, alloc, slot);
-        link_raw(g, alloc, slot, span);
-    }
-}
-
-unsafe fn unlink_raw(g: GridPtrs, alloc: &mut ProxyAlloc, slot: usize) {
-    unsafe {
-        let body = &mut *g.bodies.add(slot);
-        let mut p = body.proxy;
-        let guard = isize::MAX as u32;
-        let mut n = 0u32;
-        while p != NONE {
-            n += 1;
-            if n > guard {
-                break;
-            }
-            let proxy = &mut *g.proxies.add(p as usize);
-            let next = proxy.owned_next;
-            let cx = proxy.cx;
-            let cy = proxy.cy;
-            let list = proxy.list as usize;
-            if let Some(i) = dense_slot(g, cx, cy) {
-                let head = &mut (*g.heads.add(i)).lists[list];
-                let mut prev = NONE;
-                let mut cur = *head;
-                let mut steps = 0u32;
-                while cur != NONE {
-                    steps += 1;
-                    if steps > guard {
-                        break;
-                    }
-                    let cur_p = &mut *g.proxies.add(cur as usize);
-                    let nxt = cur_p.bucket_next;
-                    if cur == p {
-                        if prev == NONE {
-                            *head = nxt;
-                        } else {
-                            (*g.proxies.add(prev as usize)).bucket_next = nxt;
-                        }
-                        break;
-                    }
-                    prev = cur;
-                    cur = nxt;
-                }
-            }
-            let freed = &mut *g.proxies.add(p as usize);
-            freed.bucket_next = alloc.local_free;
-            freed.owned_next = NONE;
-            alloc.local_free = p;
-            p = next;
-        }
-        let body = &mut *g.bodies.add(slot);
-        body.proxy = NONE;
-        body.linked = 0;
-    }
-}
-
-unsafe fn link_raw(g: GridPtrs, alloc: &mut ProxyAlloc, slot: usize, span: (i32, i32, i32, i32)) {
-    unsafe {
-        let (c0, r0, c1, r1) = span;
-        let list: u8 = if (*g.bodies.add(slot)).sensor != 0 { 1 } else { 0 };
-        let mut owned = NONE;
-        let mut cy = r0;
-        loop {
-            let mut cx = c0;
-            loop {
-                let p = alloc_raw(g, alloc, slot as u32, cx, cy, owned, list);
-                let i = dense_slot(g, cx, cy).expect("格子应先扩好");
-                let head = &mut (*g.heads.add(i)).lists[list as usize];
-                (*g.proxies.add(p as usize)).bucket_next = *head;
-                *head = p;
-                owned = p;
-                if cx == c1 {
-                    break;
-                }
-                cx += 1;
-            }
-            if cy == r1 {
-                break;
-            }
-            cy += 1;
-        }
-        let body = &mut *g.bodies.add(slot);
-        body.proxy = owned;
-        body.c0 = c0;
-        body.r0 = r0;
-        body.c1 = c1;
-        body.r1 = r1;
-        body.linked = 1;
-    }
-}
-
-unsafe fn alloc_raw(g: GridPtrs, alloc: &mut ProxyAlloc, slot: u32, cx: i32, cy: i32, owned_next: u32, list: u8) -> u32 {
-    unsafe {
-        let p = if alloc.local_free != NONE {
-            let p = alloc.local_free;
-            alloc.local_free = (*g.proxies.add(p as usize)).bucket_next;
-            p
-        } else {
-            let p = alloc.next;
-            alloc.next += 1;
-            debug_assert!(p < alloc.end);
-            p
-        };
-        *g.proxies.add(p as usize) = Proxy {
-            slot,
-            cx,
-            cy,
-            bucket_next: NONE,
-            owned_next,
-            list,
-            _pad: 0,
-            pack_at: 0,
-        };
-        p
-    }
-}

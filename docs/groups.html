@@ -103,7 +103,6 @@
       <li><a href="#clear">clear</a></li>
       <li><a href="#set_pose">set_pose</a></li>
       <li><a href="#move_by">move_by</a></li>
-      <li><a href="#move_many">move_many</a></li>
       <li><a href="#pose">pose</a></li>
       <li><a href="#set_size">set_size</a></li>
       <li><a href="#size">size</a></li>
@@ -207,12 +206,6 @@ world = Foil.Foil(backend="cpu", real="f32", threads=16)</pre>
   <p class="en">Slide by this frame's displacement and store the new center. Horizontal first, then vertical. In open space each axis scans the grid once. Touching an edge is allowed. A center that already overlaps another body is pushed to the nearer touching edge. Sensors do not block and are not blocked. Returns the stored center. A missing id returns <code>(0, 0)</code> and changes nothing.</p>
   <pre class="rs">let (x, y) = world.move_by(id, dx, dy);</pre>
   <pre class="py">x, y = world.move_by(idx, dx, dy)</pre>
-
-  <h3 id="move_many"><code>move_many</code></h3>
-  <p class="zh">同一帧移动一批。先一起按起点滑一遍并写回，再从各自的起点滑第二遍，第二遍看见第一遍停下的位置。起点已经在别人身体里时，这一轴停在起点。少于 192 个或线程上限是 1 时，改走逐个移动。重复编号也改走逐个移动。</p>
-  <p class="en">Move a batch in one frame. Everyone first slides from the positions at the start of the frame and the results are stored. Then everyone slides again from those same starts, this time seeing where the first slide stopped. A center that already lies inside another body stays put on that axis. Fewer than 192 bodies, or a thread cap of 1, falls back to one-by-one moves. Duplicate ids do too.</p>
-  <pre class="rs">let poses = world.move_many(&amp;ids, &amp;dx, &amp;dy);</pre>
-  <pre class="py"># 这一版 Python 绑定还没有 move_many</pre>
 
   <h3 id="pose"><code>pose</code></h3>
   <p class="zh">读中心。编号不存在时返回 <code>None</code>。</p>
